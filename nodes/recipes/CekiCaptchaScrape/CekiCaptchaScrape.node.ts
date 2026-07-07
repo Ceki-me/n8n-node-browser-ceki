@@ -4,8 +4,8 @@ import { connect } from '@ceki/sdk';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Ждём появления селектора в DOM через CDP Runtime.evaluate.
- * CDP allowlist main-mode разрешает Runtime.evaluate (используется в paste/copy).
+ * Wait for a selector to appear in the DOM via Runtime.evaluate.
+ * The main-mode allowlist permits Runtime.evaluate (also used by paste/copy).
  */
 async function waitForSelector(browser: any, selector: string, timeoutMs: number, intervalMs = 500) {
 	const expr = `!!document.querySelector(${JSON.stringify(selector)})`;
@@ -28,7 +28,7 @@ async function waitForSelector(browser: any, selector: string, timeoutMs: number
 	);
 }
 
-/** Вытащить outerHTML первого элемента по селектору (или весь <body>). */
+/** Extract the outerHTML of the first element matching the selector (or the whole <body>). */
 async function extractHtml(browser: any, selector: string): Promise<string> {
 	const expr =
 		selector.trim() === '' || selector === 'body'
@@ -43,11 +43,11 @@ async function extractHtml(browser: any, selector: string): Promise<string> {
 
 /**
  * Recipe: Captcha-protected Scrape.
- * Арендовать human-браузер → открыть URL → (опц.) дождаться селектора →
- * запросить решение капчи у человека (requestCaptcha) → снять snapshot/HTML → отпустить.
+ * Rent a human browser → open a URL → (optional) wait for a selector →
+ * request a human to solve the captcha (requestCaptcha) → snapshot/HTML → release.
  *
- * Это коронной юзкейс ceki: anti-bot-сайт проходит за счёт реального fingerprint,
- * капчу решает живой человек (provider/solver).
+ * This is Ceki's signature use case: anti-bot sites load thanks to the real fingerprint,
+ * and the captcha is solved by a real person (provider/solver).
  */
 export class CekiCaptchaScrape implements INodeType {
 	description: INodeTypeDescription = {
@@ -193,20 +193,20 @@ export class CekiCaptchaScrape implements INodeType {
 					};
 					captchaSolved = result.solved;
 					if (!result.solved) {
-						// не решена — отказываем solver'у (не оплачиваем), кидаем ошибку
+						// not solved — reject the solver (don't pay) and throw
 						await result.rejectWork(result.cancelReason ?? 'not solved');
 						throw new Error(`Captcha not solved: ${result.cancelReason ?? 'unknown'}`);
 					}
-					// autoAccept=true — SDK уже принял; иначе подтверждаем оплату руками
+					// autoAccept=true — the SDK already accepted; otherwise confirm payment manually
 					if (!autoAccept) await result.acceptWork();
 				}
 
-				// после капчи страница обычно перезагружается — снова ждём селектор/стабилизации
+				// after the captcha the page usually reloads — wait for the selector/stabilization again
 				if (waitSelector) {
 					try {
 						await waitForSelector(browser, waitSelector, waitTimeout);
 					} catch {
-						/* не критично — снимаем что есть */
+						/* non-critical — capture what's there */
 					}
 				}
 

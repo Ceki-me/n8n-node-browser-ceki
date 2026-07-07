@@ -7,13 +7,13 @@ import type {
 import { ContractClient } from '@ceki/sdk';
 
 /**
- * Ceki Contract — operation-нода для контракт-системы ceki (tasks/events).
- * Под капотом ContractClient из @ceki/sdk (create/propose/comment/progress/vote/...).
- * Та же credential cekiApi (token ag_...), что и у Browser Ceki.
+ * Ceki Contract — operation node for the Ceki contract system (tasks/events).
+ * Powered by ContractClient from @ceki/sdk (create/propose/comment/progress/call-human/...).
+ * Uses the same cekiApi credential (token ag_...) as Browser Ceki.
  *
- * Статусы (KalEvent.status_id): 100 Backlog · 200 Hand · 222 Hand-done ·
- * 300 QA · 350 QA-done · 499 Reviewer. benefitable = исполнитель
- * (строка "agent:<id>" или "user:<id>").
+ * Statuses (KalEvent.status_id): 100 Backlog · 200 Hand · 222 Hand-done ·
+ * 300 QA · 350 QA-done · 499 Reviewer. benefitable = the executor
+ * (a string of the form "agent:<id>" or "user:<id>").
  */
 const STATUS_OPTIONS = [
 	{ name: '100 · Backlog', value: 100 },
@@ -32,7 +32,7 @@ export class CekiContract implements INodeType {
 		group: ['transform'],
 		version: 1,
 		subtitle: '={{ "Contract: " + $operation }}',
-		description: 'Work with ceki contract tasks: list, create, assign, status, comment, vote, poll',
+		description: 'Work with Ceki contract tasks: list, create, assign, update status, comment, report progress, escalate to a human, and poll',
 		defaults: { name: 'Ceki Contract' },
 		inputs: ['main'],
 		outputs: ['main'],
@@ -109,7 +109,7 @@ export class CekiContract implements INodeType {
 				name: 'benefitableValue',
 				type: 'number',
 				default: 0,
-				description: 'agent_id или user_id исполнителя',
+				description: 'Agent ID or user ID of the executor',
 				displayOptions: { show: { operation: ['createTask', 'assign'] } },
 			},
 			// --- status ---
@@ -129,7 +129,7 @@ export class CekiContract implements INodeType {
 				typeOptions: { rows: 4 },
 				default: '',
 				required: true,
-				description: 'Тело progress-комментария (не перезаписывает spec задачи)',
+				description: 'Body of the progress comment (does not overwrite the task spec)',
 				displayOptions: { show: { operation: ['progress'] } },
 			},
 			// --- call human (escalate) ---
@@ -143,7 +143,7 @@ export class CekiContract implements INodeType {
 					{ name: 'Review (done, take a look)', value: 'review' },
 					{ name: 'Stuck (blocked)', value: 'stuck' },
 				],
-				description: 'Тип эскалации к человеку (call-human MCP tool)',
+				description: 'Type of escalation to a human (the call-human action)',
 				displayOptions: { show: { operation: ['callHuman'] } },
 			},
 			{
@@ -153,7 +153,7 @@ export class CekiContract implements INodeType {
 				typeOptions: { rows: 4 },
 				default: '',
 				required: true,
-				description: 'Что сказать человеку — контекст/вопрос/что сделано',
+				description: 'What to tell the human — context, question, or what was done',
 				displayOptions: { show: { operation: ['callHuman'] } },
 			},
 		],

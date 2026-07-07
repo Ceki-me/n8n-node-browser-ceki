@@ -3,7 +3,7 @@ import { connect } from '@ceki/sdk';
 
 /**
  * Recipe: Screenshot in Geo.
- * Один вызов — арендовать браузер в нужной geo, открыть URL, снять скрин, отпустить.
+ * One call — rent a browser in the requested geo, open a URL, take a screenshot, release.
  */
 export class CekiScreenshotGeo implements INodeType {
 	description: INodeTypeDescription = {

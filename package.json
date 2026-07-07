@@ -1,19 +1,31 @@
 {
   "name": "n8n-nodes-ceki",
   "version": "0.1.0",
-  "description": "Ceki integration for n8n — rent real human browsers for AI automation",
+  "description": "Rent real human browsers in n8n — anti-bot scraping, human-solved captchas, geo-targeting, and contract-based hiring of agents and humans. Powered by Ceki.",
   "keywords": [
     "n8n-community-node-package",
+    "n8n",
     "ceki",
     "browser",
     "automation",
+    "web-automation",
     "rent",
     "anti-bot",
-    "ai-agents"
+    "captcha",
+    "scraping",
+    "scraper",
+    "geo",
+    "human-browser",
+    "ai-agents",
+    "rpa"
   ],
   "license": "MIT",
+  "author": "Ceki (https://ceki.me)",
   "homepage": "https://browser.ceki.me",
-  "repository": "github:ceki/n8n-nodes-ceki",
+  "repository": "github:Ceki-me/n8n-nodes-ceki",
+  "bugs": {
+    "url": "https://github.com/Ceki-me/n8n-nodes-ceki/issues"
+  },
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc && node scripts/copy-icons.js",

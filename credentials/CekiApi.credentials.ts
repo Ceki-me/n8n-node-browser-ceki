@@ -1,8 +1,8 @@
 import type { ICredentialType, INodeProperties } from 'n8n-workflow';
 
 /**
- * Ceki agent token (ag_...). Авторизует все Ceki-ноды.
- * Получить: панель ceki → профиль агента → API key.
+ * Ceki agent token (ag_...). Authorizes every Ceki node.
+ * Get it from the Ceki panel → agent profile → API key.
  */
 export class CekiApi implements ICredentialType {
 	name = 'cekiApi';

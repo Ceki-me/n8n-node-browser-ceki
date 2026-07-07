@@ -8,15 +8,15 @@ import { connect } from '@ceki/sdk';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-const DEFAULT_CODE = `// browser — арендованный. connect/rent/close нода делает сама.
+const DEFAULT_CODE = `// A browser is already rented for you. connect/rent/close are handled by the node.
 await browser.navigate('https://ifconfig.me');
 const shot = await browser.screenshot();
 return [{ json: { ok: true, size: shot.length } }];
 `;
 
 /**
- * Browser Ceki — одна нода, много операций.
- * connect/rent/resume/close — внутри. session_id течёт между вызовами ноды.
+ * Browser Ceki — one node, many operations.
+ * connect/rent/resume/close happen internally. session_id flows between calls of the node.
  */
 export class BrowserCeki implements INodeType {
 	description: INodeTypeDescription = {
@@ -26,7 +26,7 @@ export class BrowserCeki implements INodeType {
 		group: ['transform'],
 		version: 1,
 		subtitle: '={{ "Ceki: " + $operation }}',
-		description: 'Rent a real human browser and control it (rent, navigate, click, type, screenshot, ...)',
+		description: 'Rent a real human browser and control it: rent, navigate, click, type, screenshot, solve captchas, and more',
 		defaults: { name: 'Browser Ceki' },
 		inputs: ['main'],
 		outputs: ['main'],
@@ -52,13 +52,13 @@ export class BrowserCeki implements INodeType {
 					{ name: 'Run Code', value: 'code' },
 				],
 			},
-			// === Rent / Code: параметры аренды ===
+			// === Rent / Code: rental parameters ===
 			{
 				displayName: 'Schedule ID',
 				name: 'scheduleId',
 				type: 'number',
 				default: 0,
-				description: '0 — search по фильтрам ниже',
+				description: '0 — search by the filters below',
 				displayOptions: { show: { operation: ['rent', 'code'] } },
 			},
 			{
@@ -101,7 +101,7 @@ export class BrowserCeki implements INodeType {
 				name: 'sessionId',
 				type: 'string',
 				default: '={{ $json.session_id }}',
-				description: 'Из операции Rent',
+				description: 'From the Rent operation',
 				required: true,
 				displayOptions: {
 					show: {
@@ -186,7 +186,7 @@ export class BrowserCeki implements INodeType {
 				name: 'waitTimeout',
 				type: 'number',
 				default: 30000,
-				description: 'Polls the DOM via CDP Runtime.evaluate until the selector appears',
+				description: 'Waits until the selector appears in the DOM',
 				displayOptions: { show: { operation: ['waitForSelector'] } },
 			},
 			{
@@ -205,7 +205,7 @@ export class BrowserCeki implements INodeType {
 				displayOptions: { show: { operation: ['upload'] } },
 			},
 			{
-				displayName: 'JavaScript (browser в scope)',
+				displayName: 'JavaScript (a live browser is in scope)',
 				name: 'code',
 				type: 'string',
 				typeOptions: { editor: 'codeNodeEditor', rows: 12 },
@@ -246,7 +246,7 @@ export class BrowserCeki implements INodeType {
 					out.push({
 						json: { session_id: browser.sessionId, schedule_id: sid, mode },
 					});
-					await client.disconnect(); // сессия в grace — следующая нода resume
+					await client.disconnect(); // session stays in grace — the next node resumes it
 					continue;
 				}
 
@@ -270,7 +270,7 @@ export class BrowserCeki implements INodeType {
 					continue;
 				}
 
-				// остальные операции — resume по sessionId
+				// remaining operations resume by sessionId
 				const sessionId = this.getNodeParameter('sessionId', i) as string;
 				browser = await client.resume(sessionId);
 				const sid = browser.sessionId;
@@ -380,7 +380,7 @@ export class BrowserCeki implements INodeType {
 				if (op === 'close') {
 					await client.close();
 				} else {
-					await client.disconnect(); // сессия жива для следующей ноды
+					await client.disconnect(); // session stays alive for the next node
 				}
 			} finally {
 				// trap

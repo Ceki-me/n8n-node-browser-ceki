@@ -1,5 +1,5 @@
-// Копирует ceki.svg рядом с каждой нодой → в соответствующую папку dist/nodes/...
-// tsc копирует только .ts; иконки (file:ceki.svg) n8n ищет рядом со скомпилированным .js.
+// Copies ceki.png next to every node → into the matching dist/nodes/... folder.
+// tsc only compiles .ts; the icon (file:ceki.png) must sit beside the compiled .js for n8n to find it.
 const fs = require('fs');
 const path = require('path');
 
@@ -27,4 +27,4 @@ for (const d of walk('dist/nodes')) {
 	fs.writeFileSync(path.join(d, 'ceki.png'), svg);
 	n++;
 }
-console.log(`copied ceki.svg to ${n} node dirs`);
+console.log(`copied ceki.png to ${n} node dirs`);
