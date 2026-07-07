@@ -1,0 +1,46 @@
+{
+  "name": "n8n-nodes-ceki",
+  "version": "0.1.0",
+  "description": "Ceki integration for n8n — rent real human browsers for AI automation",
+  "keywords": [
+    "n8n-community-node-package",
+    "ceki",
+    "browser",
+    "automation",
+    "rent",
+    "anti-bot",
+    "ai-agents"
+  ],
+  "license": "MIT",
+  "homepage": "https://browser.ceki.me",
+  "repository": "github:ceki/n8n-nodes-ceki",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc && node scripts/copy-icons.js",
+    "typecheck": "tsc --noEmit",
+    "dev": "tsc --watch"
+  },
+  "files": [
+    "dist"
+  ],
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": [
+      "dist/credentials/*.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/**/*.node.js"
+    ]
+  },
+  "dependencies": {
+    "@ceki/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "n8n-workflow": "*",
+    "typescript": "^5.4.0"
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  }
+}
