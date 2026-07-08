@@ -30,7 +30,9 @@
   "scripts": {
     "build": "tsc && node scripts/copy-icons.js",
     "typecheck": "tsc --noEmit",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "lint": "echo 'No linter configured - add eslint if needed'",
+    "release": "npm run build && npm version --git-tag-version true"
   },
   "files": [
     "dist"
