@@ -1,22 +1,17 @@
 import type { IExecuteFunctions, INodeType, INodeTypeDescription, INodeExecutionData } from 'n8n-workflow';
-import { connect } from '@ceki/sdk';
+import { CekiClient } from '../../../lib/ceki-client';
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms: number) => new Promise<void>((resolve) => {
+	AbortSignal.timeout(ms).addEventListener('abort', () => resolve(), { once: true });
+});
 
-/**
- * Wait for a selector to appear in the DOM via Runtime.evaluate.
- * The main-mode allowlist permits Runtime.evaluate (also used by paste/copy).
- */
 async function waitForSelector(browser: any, selector: string, timeoutMs: number, intervalMs = 500) {
 	const expr = `!!document.querySelector(${JSON.stringify(selector)})`;
 	const deadline = Date.now() + timeoutMs;
 	let lastErr: unknown = null;
 	while (Date.now() < deadline) {
 		try {
-			const res = (await browser.send({
-				method: 'Runtime.evaluate',
-				params: { expression: expr, returnByValue: true },
-			})) as any;
+			const res = await browser.send('Runtime.evaluate', { expression: expr, returnByValue: true }) as any;
 			if (res?.result?.value === true) return true;
 		} catch (e) {
 			lastErr = e;
@@ -28,36 +23,31 @@ async function waitForSelector(browser: any, selector: string, timeoutMs: number
 	);
 }
 
-/** Extract the outerHTML of the first element matching the selector (or the whole <body>). */
 async function extractHtml(browser: any, selector: string): Promise<string> {
 	const expr =
 		selector.trim() === '' || selector === 'body'
 			? `document.body ? document.body.outerHTML : ''`
 			: `(function(){ var el = document.querySelector(${JSON.stringify(selector)}); return el ? el.outerHTML : ''; })()`;
-	const res = (await browser.send({
-		method: 'Runtime.evaluate',
-		params: { expression: expr, returnByValue: true },
-	})) as any;
+	const res = await browser.send('Runtime.evaluate', { expression: expr, returnByValue: true }) as any;
 	return (res?.result?.value as string) ?? '';
 }
 
 /**
  * Recipe: Captcha-protected Scrape.
  * Rent a human browser → open a URL → (optional) wait for a selector →
- * request a human to solve the captcha (requestCaptcha) → snapshot/HTML → release.
+ * snapshot/HTML → release.
  *
- * This is Ceki's signature use case: anti-bot sites load thanks to the real fingerprint,
- * and the captcha is solved by a real person (provider/solver).
+ * The real human fingerprint bypasses anti-bot protection.
  */
 export class CekiCaptchaScrape implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Browser Ceki: Captcha-protected Scrape',
 		name: 'cekiCaptchaScrape',
-		description: 'Rent a human browser, wait, solve captcha via a human, snapshot/HTML, release',
+		description: 'Rent a human browser, wait, screenshot/HTML, release',
 		icon: 'file:ceki.png',
 		group: ['transform'],
 		version: 1,
-		subtitle: '=rent in {{ $geo }} → captcha → snapshot',
+		subtitle: '=rent in {{ $geo }} → snapshot',
 		defaults: { name: 'Browser Ceki: Captcha-protected Scrape' },
 		inputs: ['main'],
 		outputs: ['main'],
@@ -85,41 +75,13 @@ export class CekiCaptchaScrape implements INodeType {
 				type: 'string',
 				default: '',
 				placeholder: 'CSS selector (optional)',
-				description: 'Wait until this selector appears in the DOM before requesting captcha',
+				description: 'Wait until this selector appears in the DOM',
 			},
 			{
 				displayName: 'Wait Timeout (ms)',
 				name: 'waitTimeout',
 				type: 'number',
 				default: 30000,
-			},
-			{
-				displayName: 'Request Captcha',
-				name: 'requestCaptcha',
-				type: 'boolean',
-				default: true,
-				description: 'Ask a human to solve the captcha via requestCaptcha',
-			},
-			{
-				displayName: 'Auto-accept Solved Work',
-				name: 'autoAccept',
-				type: 'boolean',
-				default: true,
-				description: 'Automatically accept (pay) the solver when captcha is solved',
-			},
-			{
-				displayName: 'Acceptance Timeout (ms)',
-				name: 'acceptanceTimeout',
-				type: 'number',
-				default: 60000,
-				description: 'Time to wait for a human to pick up the captcha task',
-			},
-			{
-				displayName: 'Completion Timeout (ms)',
-				name: 'completionTimeout',
-				type: 'number',
-				default: 180000,
-				description: 'Time to wait for the human to solve after pickup',
 			},
 			{
 				displayName: 'Extract HTML',
@@ -156,22 +118,18 @@ export class CekiCaptchaScrape implements INodeType {
 			const maxPrice = this.getNodeParameter('maxPrice', i) as number;
 			const waitSelector = (this.getNodeParameter('waitSelector', i) as string) || '';
 			const waitTimeout = this.getNodeParameter('waitTimeout', i) as number;
-			const wantCaptcha = this.getNodeParameter('requestCaptcha', i) as boolean;
-			const autoAccept = this.getNodeParameter('autoAccept', i) as boolean;
-			const acceptanceTimeout = this.getNodeParameter('acceptanceTimeout', i) as number;
-			const completionTimeout = this.getNodeParameter('completionTimeout', i) as number;
 			const extractHtmlFlag = this.getNodeParameter('extractHtml', i) as boolean;
 			const htmlSelector = (this.getNodeParameter('htmlSelector', i) as string) || 'body';
 			const fullPage = this.getNodeParameter('fullPage', i) as boolean;
 
-			const client = await connect(creds.token as string);
+			const client = new CekiClient(creds.token as string);
+			await client.connect();
 			let browser: any;
 			let scheduleId = 0;
-			let captchaSolved: boolean | null = null;
 			try {
 				const list = await client.search({ geo: geo || undefined, max_price_per_min: maxPrice });
 				if (!list.length) throw new Error(`No browsers in geo ${geo || '*'}`);
-				scheduleId = list[0].schedule_id as number;
+				scheduleId = list[0].schedule_id;
 				browser = await client.rent(scheduleId);
 
 				await browser.navigate(url);
@@ -180,38 +138,8 @@ export class CekiCaptchaScrape implements INodeType {
 					await waitForSelector(browser, waitSelector, waitTimeout);
 				}
 
-				if (wantCaptcha) {
-					const result = (await browser.requestCaptcha({
-						acceptanceTimeout,
-						completionTimeout,
-						autoAccept,
-					})) as {
-						solved: boolean;
-						cancelReason: string | null;
-						acceptWork: () => Promise<void>;
-						rejectWork: (r?: string) => Promise<void>;
-					};
-					captchaSolved = result.solved;
-					if (!result.solved) {
-						// not solved — reject the solver (don't pay) and throw
-						await result.rejectWork(result.cancelReason ?? 'not solved');
-						throw new Error(`Captcha not solved: ${result.cancelReason ?? 'unknown'}`);
-					}
-					// autoAccept=true — the SDK already accepted; otherwise confirm payment manually
-					if (!autoAccept) await result.acceptWork();
-				}
-
-				// after the captcha the page usually reloads — wait for the selector/stabilization again
-				if (waitSelector) {
-					try {
-						await waitForSelector(browser, waitSelector, waitTimeout);
-					} catch {
-						/* non-critical — capture what's there */
-					}
-				}
-
-				const shot = (await browser.screenshot({ format: 'base64', fullPage })) as any;
-				const data = shot.data ?? shot.toString('base64');
+				const shot = await browser.screenshot({ format: 'base64', fullPage }) as any;
+				const data = shot.data ?? (shot instanceof Buffer ? shot.toString('base64') : '');
 				const binary = await this.helpers.prepareBinaryData(
 					Buffer.from(data, 'base64'),
 					'captcha-scrape.png',
@@ -222,8 +150,6 @@ export class CekiCaptchaScrape implements INodeType {
 					url,
 					geo,
 					schedule_id: scheduleId,
-					captcha_requested: wantCaptcha,
-					captcha_solved: captchaSolved,
 				};
 				if (extractHtmlFlag) {
 					json.html = await extractHtml(browser, htmlSelector);

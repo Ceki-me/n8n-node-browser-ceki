@@ -4,17 +4,8 @@ import type {
 	INodeType,
 	INodeTypeDescription,
 } from 'n8n-workflow';
-import { ContractClient } from '@ceki/sdk';
+import { ContractClient } from '../../lib/contract-client';
 
-/**
- * Ceki Contract — operation node for the Ceki contract system (tasks/events).
- * Powered by ContractClient from @ceki/sdk (create/propose/comment/progress/call-human/...).
- * Uses the same cekiApi credential (token ag_...) as Browser Ceki.
- *
- * Statuses (KalEvent.status_id): 100 Backlog · 200 Hand · 222 Hand-done ·
- * 300 QA · 350 QA-done · 499 Reviewer. benefitable = the executor
- * (a string of the form "agent:<id>" or "user:<id>").
- */
 const STATUS_OPTIONS = [
 	{ name: '100 · Backlog', value: 100 },
 	{ name: '200 · Hand (assigned)', value: 200 },
@@ -24,6 +15,10 @@ const STATUS_OPTIONS = [
 	{ name: '499 · Reviewer', value: 499 },
 ];
 
+/**
+ * Ceki Contract — operation node for the Ceki contract system (tasks/events).
+ * Uses native fetch() — zero external runtime deps.
+ */
 export class CekiContract implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Ceki Contract',
@@ -163,7 +158,8 @@ export class CekiContract implements INodeType {
 		const items = this.getInputData();
 		const out: INodeExecutionData[] = [];
 		const creds = await this.getCredentials('cekiApi');
-		const client = new ContractClient({ token: creds.token as string });
+		const token = creds.token as string;
+		const client = new ContractClient(token);
 
 		for (let i = 0; i < items.length; i++) {
 			const op = this.getNodeParameter('operation', i) as string;

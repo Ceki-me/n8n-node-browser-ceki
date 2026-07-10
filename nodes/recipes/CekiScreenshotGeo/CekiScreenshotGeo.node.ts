@@ -1,5 +1,5 @@
 import type { IExecuteFunctions, INodeType, INodeTypeDescription, INodeExecutionData } from 'n8n-workflow';
-import { connect } from '@ceki/sdk';
+import { CekiClient } from '../../../lib/ceki-client';
 
 /**
  * Recipe: Screenshot in Geo.
@@ -43,14 +43,15 @@ export class CekiScreenshotGeo implements INodeType {
 			const fullPage = this.getNodeParameter('fullPage', i) as boolean;
 			const maxPrice = this.getNodeParameter('maxPrice', i) as number;
 
-			const client = await connect(creds.token as string);
+			const client = new CekiClient(creds.token as string);
+			await client.connect();
 			let browser: any;
 			try {
 				const list = await client.search({ geo, max_price_per_min: maxPrice });
 				if (!list.length) throw new Error(`No browsers in geo ${geo}`);
 				browser = await client.rent(list[0].schedule_id);
 				await browser.navigate(url);
-				const shot = (await browser.screenshot({ format: 'base64', fullPage })) as any;
+				const shot = await browser.screenshot({ format: 'base64', fullPage }) as any;
 				const binary = await this.helpers.prepareBinaryData(
 					Buffer.from(shot.data, 'base64'),
 					'screenshot.png',

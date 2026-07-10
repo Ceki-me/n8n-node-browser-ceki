@@ -4,19 +4,15 @@ import type {
 	INodeType,
 	INodeTypeDescription,
 } from 'n8n-workflow';
-import { connect } from '@ceki/sdk';
+import { CekiClient } from '../../lib/ceki-client';
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-const DEFAULT_CODE = `// A browser is already rented for you. connect/rent/close are handled by the node.
-await browser.navigate('https://ifconfig.me');
-const shot = await browser.screenshot();
-return [{ json: { ok: true, size: shot.length } }];
-`;
+const sleep = (ms: number) => new Promise<void>((resolve) => {
+	AbortSignal.timeout(ms).addEventListener('abort', () => resolve(), { once: true });
+});
 
 /**
  * Browser Ceki — one node, many operations.
- * connect/rent/resume/close happen internally. session_id flows between calls of the node.
+ * Uses native WebSocket (not the ws library) — zero external runtime deps.
  */
 export class BrowserCeki implements INodeType {
 	description: INodeTypeDescription = {
@@ -49,17 +45,16 @@ export class BrowserCeki implements INodeType {
 					{ name: 'Wait for Selector', value: 'waitForSelector' },
 					{ name: 'Upload', value: 'upload' },
 					{ name: 'Close', value: 'close' },
-					{ name: 'Run Code', value: 'code' },
 				],
 			},
-			// === Rent / Code: rental parameters ===
+			// === Rent: rental parameters ===
 			{
 				displayName: 'Schedule ID',
 				name: 'scheduleId',
 				type: 'number',
 				default: 0,
 				description: '0 — search by the filters below',
-				displayOptions: { show: { operation: ['rent', 'code'] } },
+				displayOptions: { show: { operation: ['rent'] } },
 			},
 			{
 				displayName: 'Geo',
@@ -67,7 +62,7 @@ export class BrowserCeki implements INodeType {
 				type: 'string',
 				default: '',
 				placeholder: 'RU, EE, US…',
-				displayOptions: { show: { operation: ['rent', 'code'] } },
+				displayOptions: { show: { operation: ['rent'] } },
 			},
 			{
 				displayName: 'Max $/min',
@@ -75,7 +70,7 @@ export class BrowserCeki implements INodeType {
 				type: 'number',
 				typeOptions: { numberPrecision: 4 },
 				default: 0.02,
-				displayOptions: { show: { operation: ['rent', 'code'] } },
+				displayOptions: { show: { operation: ['rent'] } },
 			},
 			{
 				displayName: 'Min rating',
@@ -93,7 +88,7 @@ export class BrowserCeki implements INodeType {
 					{ name: 'main', value: 'main' },
 					{ name: 'incognito', value: 'incognito' },
 				],
-				displayOptions: { show: { operation: ['rent', 'code'] } },
+				displayOptions: { show: { operation: ['rent'] } },
 			},
 			// === Operations: session_id ===
 			{
@@ -204,14 +199,6 @@ export class BrowserCeki implements INodeType {
 				default: 'data',
 				displayOptions: { show: { operation: ['upload'] } },
 			},
-			{
-				displayName: 'JavaScript (a live browser is in scope)',
-				name: 'code',
-				type: 'string',
-				typeOptions: { editor: 'codeNodeEditor', rows: 12 },
-				default: DEFAULT_CODE,
-				displayOptions: { show: { operation: ['code'] } },
-			},
 		],
 	};
 
@@ -221,7 +208,7 @@ export class BrowserCeki implements INodeType {
 		const creds = await this.getCredentials('cekiApi');
 		const token = creds.token as string;
 
-		const resolveSid = async (i: number, client: any) => {
+		const resolveSid = async (i: number, client: CekiClient) => {
 			const scheduleId = this.getNodeParameter('scheduleId', i) as number;
 			if (scheduleId) return scheduleId;
 			const geo = this.getNodeParameter('geo', i) as string;
@@ -236,7 +223,8 @@ export class BrowserCeki implements INodeType {
 
 		for (let i = 0; i < items.length; i++) {
 			const op = this.getNodeParameter('operation', i) as string;
-			const client = await connect(token);
+			const client = new CekiClient(token);
+			await client.connect();
 			let browser: any;
 			try {
 				if (op === 'rent') {
@@ -247,26 +235,6 @@ export class BrowserCeki implements INodeType {
 						json: { session_id: browser.sessionId, schedule_id: sid, mode },
 					});
 					await client.disconnect(); // session stays in grace — the next node resumes it
-					continue;
-				}
-
-				if (op === 'code') {
-					const sid = await resolveSid(i, client);
-					const mode = this.getNodeParameter('mode', i) as 'main' | 'incognito';
-					browser = await client.rent(sid, { mode });
-					const code = this.getNodeParameter('code', i) as string;
-					// eslint-disable-next-line no-new-func
-					const fn = new Function(
-						'browser',
-						'client',
-						`return (async () => {\n${code}\n})();`,
-					);
-					const result = await fn(browser, client);
-					if (Array.isArray(result)) for (const r of result) out.push(r);
-					else if (result) out.push({ json: result });
-					else out.push({ json: { done: true } });
-					await browser.close();
-					await client.close();
 					continue;
 				}
 
@@ -297,15 +265,15 @@ export class BrowserCeki implements INodeType {
 					}
 					case 'scroll': {
 						const deltaY = this.getNodeParameter('deltaY', i) as number;
-						await browser.scroll({ deltaY });
+						await browser.scroll(deltaY);
 						out.push({ json: { session_id: sid, scrolled: deltaY } });
 						break;
 					}
 					case 'screenshot': {
 						const format = this.getNodeParameter('format', i) as 'png' | 'base64';
 						const fullPage = this.getNodeParameter('fullPage', i) as boolean;
-						const shot = (await browser.screenshot({ format, fullPage })) as any;
-						const data = format === 'base64' ? shot.data : shot.toString('base64');
+						const shot = await browser.screenshot({ format, fullPage }) as any;
+						const data = format === 'base64' ? shot.data : (shot as Buffer).toString('base64');
 						const binary = await this.helpers.prepareBinaryData(
 							Buffer.from(data, 'base64'),
 							'screenshot.png',
@@ -317,7 +285,7 @@ export class BrowserCeki implements INodeType {
 					case 'snapshot': {
 						const snap = await browser.snapshot();
 						out.push({
-							json: { session_id: sid, ts: (snap as any).ts, chat: (snap as any).chat },
+							json: { session_id: sid, screenshot: snap.screenshot },
 						});
 						break;
 					}
@@ -336,10 +304,7 @@ export class BrowserCeki implements INodeType {
 						let lastErr: unknown = null;
 						while (Date.now() < deadline) {
 							try {
-								const res = (await browser.send({
-									method: 'Runtime.evaluate',
-									params: { expression: expr, returnByValue: true },
-								})) as any;
+								const res = await browser.send('Runtime.evaluate', { expression: expr, returnByValue: true }) as any;
 								if (res?.result?.value === true) {
 									ok = true;
 									break;

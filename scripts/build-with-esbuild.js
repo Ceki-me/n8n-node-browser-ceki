@@ -1,9 +1,7 @@
 /**
- * Build script that bundles each node/credential .ts file with esbuild.
- * Inlines all dependencies (@ceki/sdk, ws, mime-types, …) so the
- * published package has zero runtime deps — required for n8n verification.
- *
- * Only n8n-workflow is kept external (it's a peer dep, provided by n8n).
+ * Build script that bundles each node/credential/lib .ts file with esbuild.
+ * All dependencies are inlined at the source level (native WebSocket + fetch,
+ * no npm packages). Only n8n-workflow is kept external.
  */
 
 const esbuild = require('esbuild');
