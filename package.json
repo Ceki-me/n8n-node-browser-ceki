@@ -1,6 +1,6 @@
 {
   "name": "@ceki/n8n-nodes-ceki",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Rent real human browsers in n8n — anti-bot scraping, human-solved captchas, geo-targeting, and contract-based hiring of agents and humans. Powered by Ceki.",
   "keywords": [
     "n8n-community-node-package",
@@ -20,7 +20,7 @@
     "rpa"
   ],
   "license": "MIT",
-  "author": "Ceki (https://ceki.me)",
+  "author": "Ceki <kom@ceki.me> (https://ceki.me)",
   "homepage": "https://browser.ceki.me",
   "repository": {
     "type": "git",
