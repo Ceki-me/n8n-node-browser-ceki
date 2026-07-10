@@ -27,6 +27,9 @@ jobs:
       - name: Build package
         run: npm run build
 
-      # Trusted Publisher + --provenance handle auth via OIDC, no token needed
+      # Trusted Publisher + --provenance handle auth via OIDC.
+      # We only set the registry — no authToken (would override OIDC).
       - name: Publish to npm with provenance
-        run: npm publish --provenance --access public
+        run: |
+          echo "registry=https://registry.npmjs.org/" > ~/.npmrc
+          npm publish --provenance --access public
