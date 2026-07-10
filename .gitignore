@@ -2,3 +2,4 @@ node_modules/
 *.log
 *.tsbuildinfo
 .DS_Store
+*.tgz
