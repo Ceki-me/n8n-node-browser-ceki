@@ -1348,6 +1348,21 @@ var CekiApi = class {
         required: true
       }
     ];
+    this.authenticate = {
+      type: "generic",
+      properties: {
+        headers: {
+          Authorization: "=Bearer {{$credentials?.token}}"
+        }
+      }
+    };
+    this.test = {
+      request: {
+        baseURL: "https://api.ceki.me",
+        url: "/api/browsers/search",
+        method: "GET"
+      }
+    };
   }
 };
 
