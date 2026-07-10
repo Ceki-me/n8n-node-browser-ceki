@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
+      id-token: write       # Required for OIDC provenance
 
     steps:
       - name: Checkout repository
@@ -20,7 +20,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
         run: npm ci
@@ -28,7 +27,6 @@ jobs:
       - name: Build package
         run: npm run build
 
+      # Trusted Publisher + --provenance handle auth via OIDC, no token needed
       - name: Publish to npm with provenance
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
