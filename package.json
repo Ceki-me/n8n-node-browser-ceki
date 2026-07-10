@@ -1,6 +1,6 @@
 {
   "name": "@ceki/n8n-nodes-ceki",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "Rent real human browsers in n8n — anti-bot scraping, human-solved captchas, geo-targeting, and contract-based hiring of agents and humans. Powered by Ceki.",
   "keywords": [
     "n8n-community-node-package",
@@ -22,17 +22,18 @@
   "license": "MIT",
   "author": "Ceki (https://ceki.me)",
   "homepage": "https://browser.ceki.me",
-  "repository": "github:Ceki-me/n8n-nodes-ceki",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ceki-me/n8n-nodes-ceki.git"
+  },
   "bugs": {
     "url": "https://github.com/Ceki-me/n8n-nodes-ceki/issues"
   },
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc && node scripts/copy-icons.js",
+    "build": "node scripts/build-with-esbuild.js",
     "typecheck": "tsc --noEmit",
-    "dev": "tsc --watch",
-    "lint": "echo 'No linter configured - add eslint if needed'",
-    "release": "npm run build && npm version --git-tag-version true"
+    "dev": "tsc --watch"
   },
   "files": [
     "dist"
@@ -46,11 +47,10 @@
       "dist/nodes/**/*.node.js"
     ]
   },
-  "dependencies": {
-    "@ceki/sdk": "^1.0.0"
-  },
   "devDependencies": {
+    "@ceki/sdk": "^1.0.0",
     "@types/node": "^26.1.0",
+    "esbuild": "^0.28.1",
     "n8n-workflow": "*",
     "typescript": "^5.4.0"
   },
