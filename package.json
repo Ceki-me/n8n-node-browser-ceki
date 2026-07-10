@@ -1,6 +1,6 @@
 {
   "name": "@ceki/n8n-nodes-ceki",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Rent real human browsers in n8n — anti-bot scraping, human-solved captchas, geo-targeting, and contract-based hiring of agents and humans. Powered by Ceki.",
   "keywords": [
     "n8n-community-node-package",
@@ -41,10 +41,13 @@
   "n8n": {
     "n8nNodesApiVersion": 1,
     "credentials": [
-      "dist/credentials/*.credentials.js"
+      "dist/credentials/CekiApi.credentials.js"
     ],
     "nodes": [
-      "dist/nodes/**/*.node.js"
+      "dist/nodes/BrowserCeki/BrowserCeki.node.js",
+      "dist/nodes/CekiContract/CekiContract.node.js",
+      "dist/nodes/recipes/CekiCaptchaScrape/CekiCaptchaScrape.node.js",
+      "dist/nodes/recipes/CekiScreenshotGeo/CekiScreenshotGeo.node.js"
     ]
   },
   "devDependencies": {

@@ -26,6 +26,7 @@ function findTs(root) {
 }
 
 const entryPoints = [
+  'index.ts',
   ...findTs('nodes'),
   ...findTs('credentials'),
 ];
