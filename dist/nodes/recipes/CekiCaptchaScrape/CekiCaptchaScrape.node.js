@@ -120,17 +120,53 @@ var CekiClient = class {
     this._sendRaw({ type: "resume", session_id: sessionId });
     return this._awaitResume(sessionId);
   }
-  /** Close the WS connection — session stays alive in grace. */
-  disconnect() {
+  /** Close the WS connection — session stays alive in grace.
+   *  Waits for the close handshake so the relay processes the close
+   *  before a new connection with the same renterId is established
+   *  (avoids the close-handler race condition).
+   */
+  async disconnect() {
     this._closed = true;
     this._activeSessions.clear();
     this._pendingRents.clear();
     this._pendingResumes.clear();
-    this._closeWs();
+    if (!this._ws) return;
+    const ws = this._ws;
+    if (ws.readyState === WebSocket.CLOSED) {
+      this._ws = null;
+      return;
+    }
+    if (ws.readyState === WebSocket.CLOSING) {
+      await new Promise((r) => {
+        ws.onclose = () => {
+          this._connected = false;
+          r();
+        };
+      });
+      this._ws = null;
+      return;
+    }
+    await new Promise((r) => {
+      const t = setTimeout(() => {
+        r();
+      }, 5e3);
+      ws.onclose = () => {
+        this._connected = false;
+        clearTimeout(t);
+        r();
+      };
+      try {
+        ws.close();
+      } catch {
+        clearTimeout(t);
+        r();
+      }
+    });
+    this._ws = null;
   }
   /** Close everything. */
-  close() {
-    this.disconnect();
+  async close() {
+    await this.disconnect();
   }
   // ── private ────────────────────────────────────────────────
   _awaitRent(key, scheduleId, timeoutMs) {
@@ -154,7 +190,7 @@ var CekiClient = class {
   }
   _awaitResume(sessionId) {
     return new Promise((resolve, reject) => {
-      const timeoutSignal = AbortSignal.timeout(1e4);
+      const timeoutSignal = AbortSignal.timeout(6e4);
       timeoutSignal.addEventListener("abort", () => {
         this._pendingResumes.delete(sessionId);
         reject(new Error("Resume timed out"));
@@ -220,13 +256,33 @@ var CekiClient = class {
   _onMatch(msg) {
     const scheduleId = Number(msg.schedule_id ?? 0);
     const eventId = msg.event_id ? String(msg.event_id) : null;
+    const sessionId = String(msg.session_id ?? "");
+    if (sessionId && this._ws?.readyState === WebSocket.OPEN) {
+      try {
+        this._ws.send(JSON.stringify({ type: "match_ack", session_id: sessionId }));
+      } catch {
+      }
+    }
     let pending = this._pendingRents.get(`event:${eventId}`);
     if (!pending) pending = this._pendingRents.get(`rent:${scheduleId}`);
     if (pending) {
       this._pendingRents.delete(`event:${eventId}`);
       this._pendingRents.delete(`rent:${scheduleId}`);
       pending.resolve({
-        session_id: String(msg.session_id ?? ""),
+        session_id: sessionId,
+        schedule_id: scheduleId,
+        event_id: eventId,
+        chat_topic_id: msg.chat_topic_id ? String(msg.chat_topic_id) : null,
+        provider_user_id: msg.provider_user_id != null ? Number(msg.provider_user_id) : null,
+        browser_info: msg.browser_info ?? {}
+      });
+      return;
+    }
+    const resumePending = sessionId ? this._pendingResumes.get(sessionId) : null;
+    if (resumePending) {
+      this._pendingResumes.delete(sessionId);
+      resumePending.resolve({
+        session_id: sessionId,
         schedule_id: scheduleId,
         event_id: eventId,
         chat_topic_id: msg.chat_topic_id ? String(msg.chat_topic_id) : null,
@@ -269,9 +325,9 @@ var CekiClient = class {
     const browser = this._activeSessions.get(sessionId);
     if (!browser) return;
     const id = Number(msg.id ?? 0);
-    const pending = this._pendingCdp.get(id);
+    const pending = browser._pendingCdp.get(id);
     if (!pending) return;
-    this._pendingCdp.delete(id);
+    browser._pendingCdp.delete(id);
     if (msg.error) {
       pending.reject(new Error(String(msg.error.message ?? "CDP error")));
     } else {

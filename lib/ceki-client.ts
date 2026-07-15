@@ -144,18 +144,39 @@ export class CekiClient {
 		return this._awaitResume(sessionId);
 	}
 
-	/** Close the WS connection — session stays alive in grace. */
-	disconnect(): void {
+	/** Close the WS connection — session stays alive in grace.
+	 *  Waits for the close handshake so the relay processes the close
+	 *  before a new connection with the same renterId is established
+	 *  (avoids the close-handler race condition).
+	 */
+	async disconnect(): Promise<void> {
 		this._closed = true;
 		this._activeSessions.clear();
 		this._pendingRents.clear();
 		this._pendingResumes.clear();
-		this._closeWs();
+		if (!this._ws) return;
+		const ws = this._ws;
+		if (ws.readyState === WebSocket.CLOSED) {
+			this._ws = null;
+			return;
+		}
+		if (ws.readyState === WebSocket.CLOSING) {
+			await new Promise<void>(r => { ws.onclose = () => { this._connected = false; r(); }; });
+			this._ws = null;
+			return;
+		}
+		// OPEN → initiate close and wait for handshake (up to 5s safety timeout)
+		await new Promise<void>(r => {
+			const t = setTimeout(() => { r(); }, 5000);
+			ws.onclose = () => { this._connected = false; clearTimeout(t); r(); };
+			try { ws.close(); } catch { clearTimeout(t); r(); }
+		});
+		this._ws = null;
 	}
 
 	/** Close everything. */
-	close(): void {
-		this.disconnect();
+	async close(): Promise<void> {
+		await this.disconnect();
 	}
 
 	// ── private ────────────────────────────────────────────────
@@ -182,7 +203,7 @@ export class CekiClient {
 
 	private _awaitResume(sessionId: string): Promise<CekiBrowser> {
 		return new Promise((resolve, reject) => {
-			const timeoutSignal = AbortSignal.timeout(10000);
+			const timeoutSignal = AbortSignal.timeout(60000);
 			timeoutSignal.addEventListener('abort', () => {
 				this._pendingResumes.delete(sessionId);
 				reject(new Error('Resume timed out'));
@@ -245,13 +266,37 @@ export class CekiClient {
 	private _onMatch(msg: Record<string, unknown>): void {
 		const scheduleId = Number(msg.schedule_id ?? 0);
 		const eventId = msg.event_id ? String(msg.event_id) : null;
+		const sessionId = String(msg.session_id ?? '');
+		// Send match_ack to transition session from ACCEPTED to ACTIVE.
+		// Without this, subsequent resume from other n8n nodes would receive
+		// "match" instead of "resume_ok" (session stays ACCEPTED).
+		if (sessionId && this._ws?.readyState === WebSocket.OPEN) {
+			try { this._ws.send(JSON.stringify({ type: 'match_ack', session_id: sessionId })); } catch { /* ignore */ }
+		}
+		// Check pending rents (normal rent flow)
 		let pending = this._pendingRents.get(`event:${eventId}`);
 		if (!pending) pending = this._pendingRents.get(`rent:${scheduleId}`);
 		if (pending) {
 			this._pendingRents.delete(`event:${eventId}`);
 			this._pendingRents.delete(`rent:${scheduleId}`);
 			pending.resolve({
-				session_id: String(msg.session_id ?? ''),
+				session_id: sessionId,
+				schedule_id: scheduleId,
+				event_id: eventId,
+				chat_topic_id: msg.chat_topic_id ? String(msg.chat_topic_id) : null,
+				provider_user_id: msg.provider_user_id != null ? Number(msg.provider_user_id) : null,
+				browser_info: (msg.browser_info ?? {}) as Record<string, unknown>,
+			});
+			return;
+		}
+		// Fallback: relay may send "match" during resume if session is ACCEPTED
+		// (e.g. when rent node finished without sending match_ack).
+		// Treat it like resume_ok so the next node doesn't hang.
+		const resumePending = sessionId ? this._pendingResumes.get(sessionId) : null;
+		if (resumePending) {
+			this._pendingResumes.delete(sessionId);
+			resumePending.resolve({
+				session_id: sessionId,
 				schedule_id: scheduleId,
 				event_id: eventId,
 				chat_topic_id: msg.chat_topic_id ? String(msg.chat_topic_id) : null,
@@ -298,9 +343,11 @@ export class CekiClient {
 		const browser = this._activeSessions.get(sessionId);
 		if (!browser) return;
 		const id = Number(msg.id ?? 0);
-		const pending = this._pendingCdp.get(id);
+		// NOTE: pending CDP is stored on CekiBrowser._pendingCdp (set by CekiBrowser.send()),
+		// NOT on CekiClient._pendingCdp — they are different maps.
+		const pending = browser._pendingCdp.get(id);
 		if (!pending) return;
-		this._pendingCdp.delete(id);
+		browser._pendingCdp.delete(id);
 		if (msg.error) {
 			pending.reject(new Error(String((msg.error as Record<string, unknown>).message ?? 'CDP error')));
 		} else {

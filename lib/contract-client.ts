@@ -203,11 +203,11 @@ export class ContractClient {
 			const text = await resp.text().catch(() => '');
 			throw new Error(`poll HTTP ${resp.status}: ${text.slice(0, 300)}`);
 		}
-		const body = await resp.json();
+		const body = (await resp.json()) as Record<string, unknown>;
 		if (Array.isArray(body)) return body;
 		if (body && typeof body === 'object') {
 			for (const k of ['notifications', 'data', 'items']) {
-				if (Array.isArray(body[k])) return body[k];
+				if (Array.isArray(body[k])) return body[k] as any[];
 			}
 		}
 		return [];
