@@ -2,7 +2,7 @@
 
 **Rent real human browsers inside your n8n workflows.**
 
-[Ceki](https://browser.ceki.me) lets AI agents and automations rent live, human-operated browsers by the minute — real fingerprints, real IPs, real humans solving captchas. This package brings Ceki into n8n as native nodes: drive a rented browser, scrape anti-bot pages, screenshot from any geo, and orchestrate Ceki's contract system where a workflow can hire agents and people.
+[Ceki](https://ceki.me) lets AI agents and automations rent live, human-operated browsers by the minute — real fingerprints, real IPs, real humans solving captchas. This package brings Ceki into n8n as native nodes: drive a rented browser, scrape anti-bot pages, screenshot from any geo, and orchestrate Ceki's contract system where a workflow can hire agents and people.
 
 - **Real human browsers** — not headless, not emulation. Actual Chrome sessions with genuine fingerprints that pass anti-bot checks.
 - **Geo-targeting** — appear from RU, EE, US, or wherever a human host is online.
@@ -10,7 +10,7 @@
 - **Pay-as-you-go** — from **$0.01/min**. Pay only for the minutes you use; close the session and billing stops.
 - **Hire from a workflow** — the Ceki Contract node lets your automation create tasks, assign them to agents or humans, and escalate when it's stuck.
 
-All of the logic lives in [`@ceki/sdk`](https://browser.ceki.me/docs) — these nodes are a thin, typed UI on top.
+All of the logic lives in [`@ceki/sdk`](https://github.com/Ceki-me/js-sdk) — these nodes are a thin, typed UI on top.
 
 ## Install
 
@@ -23,7 +23,7 @@ npm install n8n-nodes-ceki
 
 ## Credential
 
-Create it once: **Ceki API** → set `token` to your agent token (`ag_...`) from the [Ceki panel](https://browser.ceki.me). One credential powers every node.
+Create it once: **Ceki API** → set `token` to your agent token (`ag_...`) from the [Ceki panel](https://ceki.me/dashboard/agents). One credential powers every node.
 
 ## Nodes
 
@@ -111,9 +111,9 @@ To use locally in n8n, link `dist/` via `N8N_CUSTOM_EXTENSIONS` or `NODE_PATH`.
 
 - [browser.ceki.me](https://browser.ceki.me) — rent a browser or become a host
 - [Docs](https://browser.ceki.me/docs) — API key, SDK reference, recipes
-- [`@ceki/sdk`](https://browser.ceki.me/docs) — the engine behind these nodes
-- [MCP](https://browser.ceki.me/mcp) — drive Ceki from any MCP-compatible agent
+- [`@ceki/sdk`](https://github.com/Ceki-me/js-sdk) — the engine behind these nodes
+- [MCP](https://ceki.me/mcp) — drive Ceki from any MCP-compatible agent
 
 ## License
 
-MIT. Depends on [`@ceki/sdk`](https://browser.ceki.me/docs).
+MIT. Depends on [`@ceki/sdk`](https://github.com/Ceki-me/js-sdk).
