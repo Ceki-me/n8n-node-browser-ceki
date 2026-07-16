@@ -57,8 +57,6 @@ export class BrowserCeki implements INodeType {
 					{ name: 'Upload', value: 'upload' },
 					{ name: 'Close', value: 'close' },
 					{ name: 'Full: Rent → Navigate → Screenshot', value: 'full' },
-            { name: 'My Sessions', value: 'my_sessions' },
-            { name: 'Stop Session', value: 'stop_session' },
 				],
 			},
 			// === Rent: rental parameters ===
@@ -132,7 +130,7 @@ export class BrowserCeki implements INodeType {
 				required: true,
 				displayOptions: {
 					show: {
-						operation: ['navigate', 'click', 'type', 'scroll', 'screenshot', 'snapshot', 'wait', 'waitForSelector', 'upload', 'close', 'stop_session'],
+						operation: ['navigate', 'click', 'type', 'scroll', 'screenshot', 'snapshot', 'wait', 'waitForSelector', 'upload', 'close'],
 					},
 				},
 			},
@@ -294,47 +292,7 @@ export class BrowserCeki implements INodeType {
 					continue;
 				}
 
-				if (op === 'my_sessions') {
-					try {
-						const resp = await fetch("https://api.ceki.me/api/agent/sessions", {
-							headers: { Authorization: `Bearer ${token}` },
-						});
-						if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-						const body = await resp.json() as any;
-						const sessions = body.data ?? [];
-						out.push({ json: { sessions, count: sessions.length } });
-					} catch (e) {
-						throw new Error(`My sessions failed: ${(e as Error).message}`);
-					}
-					continue;
-				}
 				
-				if (op === 'stop_session') {
-					const sessionId = this.getNodeParameter("sessionId", i) as string;
-					try {
-						await new Promise<void>((resolve, reject) => {
-							const ws = new WebSocket("wss://browser.ceki.me/ws/agent", [`bearer.${token}`]);
-							const t = AbortSignal.timeout(15000);
-							t.addEventListener("abort", () => { try { ws.close(); } catch {} reject(new Error("Stop session timed out")); }, { once: true });
-							ws.onopen = () => {
-								ws.send(JSON.stringify({ type: "stop", session_id: sessionId, reason: "n8n stop_session" }));
-							};
-							ws.onmessage = (ev) => {
-								const msg = JSON.parse(ev.data as string);
-								if (msg.type === "session_ended" || msg.type === "pong") {
-									try { ws.close(); } catch {}
-									resolve();
-								}
-							};
-							ws.onerror = () => { reject(new Error("WebSocket connection failed")); };
-						});
-						out.push({ json: { stopped: true, session_id: sessionId } });
-					} catch (e) {
-						throw new Error(`Stop session failed: ${(e as Error).message}`);
-					}
-					continue;
-				}
-
 				if (op === 'full') {
 					const demoMode = this.getNodeParameter('demoMode', i) as boolean;
 					let sid: number;

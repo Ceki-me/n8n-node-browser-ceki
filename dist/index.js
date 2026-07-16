@@ -473,9 +473,7 @@ var BrowserCeki = class {
             { name: "Wait for Selector", value: "waitForSelector" },
             { name: "Upload", value: "upload" },
             { name: "Close", value: "close" },
-            { name: "Full: Rent \u2192 Navigate \u2192 Screenshot", value: "full" },
-            { name: "My Sessions", value: "my_sessions" },
-            { name: "Stop Session", value: "stop_session" }
+            { name: "Full: Rent \u2192 Navigate \u2192 Screenshot", value: "full" }
           ]
         },
         // === Rent: rental parameters ===
@@ -547,7 +545,7 @@ var BrowserCeki = class {
           required: true,
           displayOptions: {
             show: {
-              operation: ["navigate", "click", "type", "scroll", "screenshot", "snapshot", "wait", "waitForSelector", "upload", "close", "stop_session"]
+              operation: ["navigate", "click", "type", "scroll", "screenshot", "snapshot", "wait", "waitForSelector", "upload", "close"]
             }
           }
         },
@@ -701,56 +699,6 @@ var BrowserCeki = class {
             throw new Error(`Search failed: ${e.message}`);
           } finally {
             await client.disconnect();
-          }
-          continue;
-        }
-        if (op === "my_sessions") {
-          try {
-            const resp = await fetch("https://api.ceki.me/api/agent/sessions", {
-              headers: { Authorization: `Bearer ${token}` }
-            });
-            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            const body = await resp.json();
-            const sessions = body.data ?? [];
-            out.push({ json: { sessions, count: sessions.length } });
-          } catch (e) {
-            throw new Error(`My sessions failed: ${e.message}`);
-          }
-          continue;
-        }
-        if (op === "stop_session") {
-          const sessionId2 = this.getNodeParameter("sessionId", i);
-          try {
-            await new Promise((resolve, reject) => {
-              const ws = new WebSocket("wss://browser.ceki.me/ws/agent", [`bearer.${token}`]);
-              const t = AbortSignal.timeout(15e3);
-              t.addEventListener("abort", () => {
-                try {
-                  ws.close();
-                } catch {
-                }
-                reject(new Error("Stop session timed out"));
-              }, { once: true });
-              ws.onopen = () => {
-                ws.send(JSON.stringify({ type: "stop", session_id: sessionId2, reason: "n8n stop_session" }));
-              };
-              ws.onmessage = (ev) => {
-                const msg = JSON.parse(ev.data);
-                if (msg.type === "session_ended" || msg.type === "pong") {
-                  try {
-                    ws.close();
-                  } catch {
-                  }
-                  resolve();
-                }
-              };
-              ws.onerror = () => {
-                reject(new Error("WebSocket connection failed"));
-              };
-            });
-            out.push({ json: { stopped: true, session_id: sessionId2 } });
-          } catch (e) {
-            throw new Error(`Stop session failed: ${e.message}`);
           }
           continue;
         }
