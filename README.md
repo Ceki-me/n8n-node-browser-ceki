@@ -10,7 +10,7 @@
 - **Pay-as-you-go** — from **$0.01/min**. Pay only for the minutes you use; close the session and billing stops.
 - **Hire from a workflow** — the Ceki Contract node lets your automation create tasks, assign them to agents or humans, and escalate when it's stuck.
 
-All of the logic lives in [`@ceki/sdk`](https://github.com/Ceki-me/js-sdk) — these nodes are a thin, typed UI on top.
+All of the logic lives in [`@ceki/sdk`](https://www.npmjs.com/package/@ceki/sdk) — these nodes are a thin, typed UI on top.
 
 ## Install
 
@@ -111,9 +111,9 @@ To use locally in n8n, link `dist/` via `N8N_CUSTOM_EXTENSIONS` or `NODE_PATH`.
 
 - [browser.ceki.me](https://browser.ceki.me) — rent a browser or become a host
 - [Docs](https://browser.ceki.me/docs) — API key, SDK reference, recipes
-- [`@ceki/sdk`](https://github.com/Ceki-me/js-sdk) — the engine behind these nodes
+- [`@ceki/sdk`](https://www.npmjs.com/package/@ceki/sdk) — the engine behind these nodes
 - [MCP](https://ceki.me/mcp) — drive Ceki from any MCP-compatible agent
 
 ## License
 
-MIT. Depends on [`@ceki/sdk`](https://github.com/Ceki-me/js-sdk).
+MIT. Depends on [`@ceki/sdk`](https://www.npmjs.com/package/@ceki/sdk).
