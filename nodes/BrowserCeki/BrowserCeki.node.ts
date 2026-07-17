@@ -4,8 +4,41 @@ import type {
 	INodeType,
 	INodeTypeDescription,
 } from 'n8n-workflow';
+import {
+	NodeApiError,
+	NodeOperationError,
+	NodeConnectionTypes,
+} from 'n8n-workflow';
 import { CekiClient } from '../../lib/ceki-client';
+import { ContractClient } from '../../lib/contract-client';
 
+
+async function waitForSelector(browser: any, selector: string, timeoutMs: number, intervalMs = 500) {
+	const expr = `!!document.querySelector(${JSON.stringify(selector)})`;
+	const deadline = Date.now() + timeoutMs;
+	let lastErr: unknown = null;
+	while (Date.now() < deadline) {
+		try {
+			const res = await browser.send('Runtime.evaluate', { expression: expr, returnByValue: true }) as any;
+			if (res?.result?.value === true) return true;
+		} catch (e) {
+			lastErr = e;
+		}
+		await sleep(intervalMs);
+	}
+	throw new Error(
+		`waitForSelector("${selector}") timed out after ${timeoutMs}ms${lastErr ? ': ' + (lastErr as Error).message : ''}`,
+	);
+}
+
+async function extractHtml(browser: any, selector: string): Promise<string> {
+	const expr =
+		selector.trim() === '' || selector === 'body'
+			? 'document.body ? document.body.outerHTML : \'\''
+			: '(function(){ var el = document.querySelector(' + JSON.stringify(selector) + '); return el ? el.outerHTML : \'\'; })()';
+	const res = await browser.send('Runtime.evaluate', { expression: expr, returnByValue: true }) as any;
+	return (res?.result?.value as string) ?? '';
+}
 const sleep = (ms: number) => new Promise<void>((resolve) => {
 	AbortSignal.timeout(ms).addEventListener('abort', () => resolve(), { once: true });
 });
@@ -28,14 +61,15 @@ export class BrowserCeki implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Browser Ceki',
 		name: 'browserCeki',
-		icon: 'file:ceki.png',
+		icon: { light: 'file:ceki-light.svg', dark: 'file:ceki-dark.svg' },
 		group: ['transform'],
 		version: 1,
+		usableAsTool: true,
 		subtitle: '={{ "Ceki: " + $parameter.operation }}',
 		description: 'Rent a real human browser and control it: rent, navigate, click, type, screenshot, solve captchas, and more',
 		defaults: { name: 'Browser Ceki' },
-		inputs: ['main'],
-		outputs: ['main'],
+		inputs: [NodeConnectionTypes.Main],
+		outputs: [NodeConnectionTypes.Main],
 		credentials: [{ name: 'cekiApi', required: true }],
 		properties: [
 			{
@@ -43,22 +77,38 @@ export class BrowserCeki implements INodeType {
 				name: 'operation',
 				type: 'options',
 				default: 'search',
+				noDataExpression: true,
 				options: [
-					{ name: 'Search', value: 'search' },
-					{ name: 'Rent', value: 'rent' },
-					{ name: 'Navigate', value: 'navigate' },
+					// Browser operations
+					{ name: 'Captcha-Protected Scrape', value: 'captchaScrape' },
 					{ name: 'Click', value: 'click' },
-					{ name: 'Type', value: 'type' },
-					{ name: 'Scroll', value: 'scroll' },
-					{ name: 'Screenshot', value: 'screenshot' },
-					{ name: 'Snapshot', value: 'snapshot' },
-					{ name: 'Wait', value: 'wait' },
-					{ name: 'Wait for Selector', value: 'waitForSelector' },
-					{ name: 'Upload', value: 'upload' },
 					{ name: 'Close', value: 'close' },
 					{ name: 'Full: Rent → Navigate → Screenshot', value: 'full' },
-            { name: 'My Sessions', value: 'my_sessions' },
-            { name: 'Stop Session', value: 'stop_session' },
+					{ name: 'My Sessions', value: 'my_sessions' },
+					{ name: 'Navigate', value: 'navigate' },
+					{ name: 'Rent', value: 'rent' },
+					{ name: 'Screenshot', value: 'screenshot' },
+					{ name: 'Screenshot in Geo', value: 'screenshotGeo' },
+					{ name: 'Scroll', value: 'scroll' },
+					{ name: 'Search', value: 'search' },
+					{ name: 'Snapshot', value: 'snapshot' },
+					{ name: 'Stop Session', value: 'stop_session' },
+					{ name: 'Type', value: 'type' },
+					{ name: 'Upload', value: 'upload' },
+					{ name: 'Wait', value: 'wait' },
+					{ name: 'Wait for Selector', value: 'waitForSelector' },
+					// Contract operations
+					{ name: 'Contract: Assign Executor', value: 'contract_assign' },
+					{ name: 'Contract: Call Human', value: 'contract_callHuman' },
+					{ name: 'Contract: Comment', value: 'contract_comment' },
+					{ name: 'Contract: Create Task', value: 'contract_create' },
+					{ name: 'Contract: Get Task', value: 'contract_get' },
+					{ name: 'Contract: List My Contracts', value: 'contract_list' },
+					{ name: 'Contract: List Tasks in Contract', value: 'contract_tasks' },
+					{ name: 'Contract: My Assigned Events', value: 'contract_myEvents' },
+					{ name: 'Contract: Poll Notifications', value: 'contract_poll' },
+					{ name: 'Contract: Progress Report', value: 'contract_progress' },
+					{ name: 'Contract: Update Status', value: 'contract_setStatus' },
 				],
 			},
 			// === Rent: rental parameters ===
@@ -76,7 +126,7 @@ export class BrowserCeki implements INodeType {
 				type: 'string',
 				default: '',
 				placeholder: 'RU, EE, US…',
-				displayOptions: { show: { operation: ['search'] } },
+				displayOptions: { show: { operation: ['search', 'captchaScrape', 'screenshotGeo'] } },
 			},
 			{
 				displayName: 'Max $/min',
@@ -84,17 +134,17 @@ export class BrowserCeki implements INodeType {
 				type: 'number',
 				typeOptions: { numberPrecision: 4 },
 				default: 0.02,
-				displayOptions: { show: { operation: ['search'] } },
+				displayOptions: { show: { operation: ['search', 'captchaScrape', 'screenshotGeo'] } },
 			},
 			{
-				displayName: 'Min rating',
+				displayName: 'Min Rating',
 				name: 'minRating',
 				type: 'number',
 				default: 0,
-				displayOptions: { show: { operation: ['search'] } },
+				displayOptions: { show: { operation: ['search', 'captchaScrape', 'screenshotGeo'] } },
 			},
 			{
-				displayName: 'Profile mode',
+				displayName: 'Profile Mode',
 				name: 'mode',
 				type: 'options',
 				default: 'incognito',
@@ -113,12 +163,210 @@ export class BrowserCeki implements INodeType {
 				displayOptions: { show: { operation: ['navigate', 'full'] } },
 			},
 			{
-				displayName: 'Demo mode (no browser needed)',
+				displayName: 'Demo Mode (No Browser Needed)',
 				name: 'demoMode',
 				type: 'boolean',
 				default: true,
-				description: 'Skip actual browser rent and generate demo output',
+				description: 'Whether to skip actual browser rent and generate demo output',
 				displayOptions: { show: { operation: ['full'] } },
+			},
+			// === Captcha-protected Scrape params ===
+			{
+				displayName: 'Captcha URL',
+				name: 'url',
+				type: 'string',
+				default: 'https://example.com',
+				required: true,
+				description: 'Page protected by anti-bot / captcha',
+				displayOptions: { show: { operation: ['captchaScrape'] } },
+			},
+			{
+				displayName: 'Geo',
+				name: 'geo',
+				type: 'string',
+				default: 'RU',
+				placeholder: 'RU, EE, US\u2026',
+				displayOptions: { show: { operation: ['captchaScrape'] } },
+			},
+			{
+				displayName: 'Max $/min',
+				name: 'maxPrice',
+				type: 'number',
+				typeOptions: { numberPrecision: 4 },
+				default: 0.02,
+				displayOptions: { show: { operation: ['captchaScrape'] } },
+			},
+			{
+				displayName: 'Wait for Selector',
+				name: 'waitSelector',
+				type: 'string',
+				default: '',
+				placeholder: 'CSS selector (optional)',
+				description: 'Wait until this selector appears in the DOM',
+				displayOptions: { show: { operation: ['captchaScrape'] } },
+			},
+			{
+				displayName: 'Wait Timeout (ms)',
+				name: 'waitTimeout',
+				type: 'number',
+				default: 30000,
+				displayOptions: { show: { operation: ['captchaScrape'] } },
+			},
+			{
+				displayName: 'Extract HTML',
+				name: 'extractHtml',
+				type: 'boolean',
+				default: true,
+				displayOptions: { show: { operation: ['captchaScrape'] } },
+			},
+			{
+				displayName: 'HTML Selector',
+				name: 'htmlSelector',
+				type: 'string',
+				default: 'body',
+				placeholder: 'CSS selector or "body"',
+				description: 'OuterHTML of this selector is returned as html',
+				displayOptions: { show: { operation: ['captchaScrape'] } },
+			},
+			{
+				displayName: 'Full Page Screenshot',
+				name: 'fullPage',
+				type: 'boolean',
+				default: false,
+				displayOptions: { show: { operation: ['captchaScrape'] } },
+			},
+			// === Screenshot in Geo params ===
+			{
+				displayName: 'Geo URL',
+				name: 'url',
+				type: 'string',
+				default: 'https://ifconfig.me',
+				required: true,
+				displayOptions: { show: { operation: ['screenshotGeo'] } },
+			},
+			{
+				displayName: 'Geo',
+				name: 'geo',
+				type: 'string',
+				default: 'RU',
+				placeholder: 'RU, EE, US\u2026',
+				displayOptions: { show: { operation: ['screenshotGeo'] } },
+			},
+			{
+				displayName: 'Full Page Screenshot',
+				name: 'fullPage',
+				type: 'boolean',
+				default: false,
+				displayOptions: { show: { operation: ['screenshotGeo'] } },
+			},
+			{
+				displayName: 'Max $/min',
+				name: 'maxPrice',
+				type: 'number',
+				default: 0.02,
+				displayOptions: { show: { operation: ['screenshotGeo'] } },
+			},
+			// === Contract params ===
+			{
+				displayName: 'Contract ID',
+				name: 'contractId',
+				type: 'number',
+				default: 0,
+				description: 'Ceki contract ID',
+				displayOptions: { show: { operation: ['contract_tasks', 'contract_create'] } },
+			},
+			{
+				displayName: 'Event ID',
+				name: 'eventId',
+				type: 'number',
+				default: 0,
+				description: 'Task / event ID (KalEvent)',
+				displayOptions: {
+					show: { operation: ['contract_get', 'contract_assign', 'contract_setStatus', 'contract_comment', 'contract_progress', 'contract_callHuman'] },
+				},
+			},
+			{
+				displayName: 'Label',
+				name: 'label',
+				type: 'string',
+				default: '',
+				required: true,
+				displayOptions: { show: { operation: ['contract_create'] } },
+			},
+			{
+				displayName: 'Description',
+				name: 'description',
+				type: 'string',
+				typeOptions: { rows: 4 },
+				default: '',
+				displayOptions: { show: { operation: ['contract_create', 'contract_comment'] } },
+			},
+			{
+				displayName: 'Executor Type',
+				name: 'benefitableType',
+				type: 'options',
+				default: 'agent',
+				options: [
+					{ name: 'Agent', value: 'agent' },
+					{ name: 'User (Human)', value: 'user' },
+				],
+				displayOptions: { show: { operation: ['contract_create', 'contract_assign'] } },
+			},
+			{
+				displayName: 'Executor ID',
+				name: 'benefitableValue',
+				type: 'number',
+				default: 0,
+				description: 'Agent ID or user ID of the executor',
+				displayOptions: { show: { operation: ['contract_create', 'contract_assign'] } },
+			},
+			{
+				displayName: 'Status',
+				name: 'status',
+				type: 'options',
+				options: [
+					{ name: '100 \u00b7 Backlog', value: 100 },
+					{ name: '200 \u00b7 Hand (Assigned)', value: 200 },
+					{ name: '222 \u00b7 Hand Done', value: 222 },
+					{ name: '300 \u00b7 QA', value: 300 },
+					{ name: '350 \u00b7 QA Done', value: 350 },
+					{ name: '499 \u00b7 Reviewer', value: 499 },
+				],
+				default: 200,
+				displayOptions: { show: { operation: ['contract_create', 'contract_setStatus', 'contract_progress'] } },
+			},
+			{
+				displayName: 'Progress Description',
+				name: 'progressDesc',
+				type: 'string',
+				typeOptions: { rows: 4 },
+				default: '',
+				required: true,
+				description: 'Body of the progress comment (does not overwrite the task spec)',
+				displayOptions: { show: { operation: ['contract_progress'] } },
+			},
+			{
+				displayName: 'Call Kind',
+				name: 'callKind',
+				type: 'options',
+				default: 'review',
+				options: [
+					{ name: 'Input (Need Clarification)', value: 'input' },
+					{ name: 'Review (Done, Take a Look)', value: 'review' },
+					{ name: 'Stuck (Blocked)', value: 'stuck' },
+				],
+				description: 'Type of escalation to a human (the call-human action)',
+				displayOptions: { show: { operation: ['contract_callHuman'] } },
+			},
+			{
+				displayName: 'Message',
+				name: 'callDesc',
+				type: 'string',
+				typeOptions: { rows: 4 },
+				default: '',
+				required: true,
+				description: 'What to tell the human \u2014 context, question, or what was done',
+				displayOptions: { show: { operation: ['contract_callHuman'] } },
 			},
 			// === Operations: session_id ===
 
@@ -263,7 +511,7 @@ export class BrowserCeki implements INodeType {
 				geo: geo || undefined,
 				max_price_per_min: maxPrice,
 			});
-			if (!list.length) throw new Error('No browsers found by filters');
+			if (!list.length) throw new NodeOperationError(this.getNode(), 'No browsers found by filters');
 			return list[0].schedule_id;
 		};
 
@@ -284,9 +532,10 @@ export class BrowserCeki implements INodeType {
 						browser = await client.rent(sid, { mode });
 						out.push({
 							json: { session_id: browser.sessionId, schedule_id: sid, mode },
+							pairedItem: { item: i },
 						});
 					} catch (e) {
-						throw new Error(`Rent failed: ${(e as Error).message}`);
+						throw new NodeApiError(this.getNode(), e as Error, { message: 'Rent failed' });
 					} finally {
 						await client.disconnect();
 					}
@@ -301,9 +550,9 @@ export class BrowserCeki implements INodeType {
 							geo: geo || undefined,
 							max_price_per_min: maxPrice,
 						});
-						out.push({ json: { browsers: list, count: list.length } });
+						out.push({ json: { browsers: list, count: list.length }, pairedItem: { item: i } });
 					} catch (e) {
-						throw new Error(`Search failed: ${(e as Error).message}`);
+						throw new NodeApiError(this.getNode(), e as Error, { message: 'Search failed' });
 					} finally {
 						await client.disconnect();
 					}
@@ -315,12 +564,12 @@ export class BrowserCeki implements INodeType {
 						const resp = await fetch("https://api.ceki.me/api/agent/sessions", {
 							headers: { Authorization: `Bearer ${token}` },
 						});
-						if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+						if (!resp.ok) throw new NodeApiError(this.getNode(), undefined as any, { message: `HTTP ${resp.status}`, httpCode: `${resp.status}` });
 						const body = await resp.json() as any;
 						const sessions = body.data ?? [];
-						out.push({ json: { sessions, count: sessions.length } });
+						out.push({ json: { sessions, count: sessions.length }, pairedItem: { item: i } });
 					} catch (e) {
-						throw new Error(`My sessions failed: ${(e as Error).message}`);
+						throw new NodeApiError(this.getNode(), e as Error, { message: 'My sessions failed' });
 					}
 					continue;
 				}
@@ -331,7 +580,7 @@ export class BrowserCeki implements INodeType {
 						await new Promise<void>((resolve, reject) => {
 							const ws = new WebSocket("wss://browser.ceki.me/ws/agent", [`bearer.${token}`]);
 							const t = AbortSignal.timeout(15000);
-							t.addEventListener("abort", () => { try { ws.close(); } catch {} reject(new Error("Stop session timed out")); }, { once: true });
+							t.addEventListener("abort", () => { try { ws.close(); } catch {} reject(new NodeApiError(this.getNode(), undefined as any, { message: "Stop session timed out" })); }, { once: true });
 							ws.onopen = () => {
 								ws.send(JSON.stringify({ type: "stop", session_id: sessionId, reason: "n8n stop_session" }));
 							};
@@ -342,11 +591,11 @@ export class BrowserCeki implements INodeType {
 									resolve();
 								}
 							};
-							ws.onerror = () => { reject(new Error("WebSocket connection failed")); };
+							ws.onerror = () => { reject(new NodeApiError(this.getNode(), undefined as any, { message: "WebSocket connection failed" })); };
 						});
-						out.push({ json: { stopped: true, session_id: sessionId } });
+						out.push({ json: { stopped: true, session_id: sessionId }, pairedItem: { item: i } });
 					} catch (e) {
-						throw new Error(`Stop session failed: ${(e as Error).message}`);
+						throw new NodeApiError(this.getNode(), e as Error, { message: 'Stop session failed' });
 					}
 					continue;
 				}
@@ -360,7 +609,7 @@ export class BrowserCeki implements INodeType {
 						try {
 							sid = await resolveSid(i, client);
 						} catch (e) {
-							throw new Error(`Full: resolve schedule failed: ${(e as Error).message}`);
+							throw new NodeApiError(this.getNode(), e as Error, { message: 'Full: resolve schedule failed' });
 						}
 					}
 					const mode = this.getNodeParameter('mode', i) as 'main' | 'incognito';
@@ -386,7 +635,7 @@ export class BrowserCeki implements INodeType {
 							binary = await this.helpers.prepareBinaryData(Buffer.from(data, 'base64'), 'screenshot.png', 'image/png');
 							await browser.close();
 						} catch (e) {
-							throw new Error(`Full op failed at step "${(browser?.sessionId ? 'navigate/screenshot' : 'rent')}": ${(e as Error).message}`);
+							throw new NodeApiError(this.getNode(), e as Error, { message: 'Full op failed' });
 						}
 					}
 
@@ -399,9 +648,180 @@ export class BrowserCeki implements INodeType {
 							waited: ms,
 						},
 						binary: { data: binary },
+					pairedItem: { item: i },
 					});
 				} finally {
 					await client.close().catch(() => {});
+				}
+				continue;
+			}
+
+			// === Captcha-Protected Scrape (rent browser → navigate → wait → screenshot → release) ===
+			if (op === 'captchaScrape') {
+				const url = this.getNodeParameter('url', i) as string;
+				const geo = this.getNodeParameter('geo', i) as string;
+				const maxPrice = this.getNodeParameter('maxPrice', i) as number;
+				const waitSelector = (this.getNodeParameter('waitSelector', i) as string) || '';
+				const waitTimeout = this.getNodeParameter('waitTimeout', i) as number;
+				const extractHtmlFlag = this.getNodeParameter('extractHtml', i) as boolean;
+				const htmlSelector = (this.getNodeParameter('htmlSelector', i) as string) || 'body';
+				const fullPage = this.getNodeParameter('fullPage', i) as boolean;
+				let scheduleId = 0;
+				try {
+					const list = await client.search({ geo: geo || undefined, max_price_per_min: maxPrice });
+					if (!list.length) throw new NodeOperationError(this.getNode(), 'No browsers in geo ' + (geo || '*'));
+					scheduleId = list[0].schedule_id;
+					browser = await client.rent(scheduleId);
+					touchedSessions.add(browser.sessionId);
+					await browser.navigate(url);
+					if (waitSelector) {
+						await waitForSelector(browser, waitSelector, waitTimeout);
+					}
+					const shot = await browser.screenshot({ format: 'base64', fullPage }) as any;
+					const data = shot.data ?? (shot instanceof Buffer ? shot.toString('base64') : '');
+					const binary = await this.helpers.prepareBinaryData(
+						Buffer.from(data, 'base64'),
+						'captcha-scrape.png',
+						'image/png',
+					);
+					const json: Record<string, unknown> = {
+						url, geo, schedule_id: scheduleId,
+					};
+					if (extractHtmlFlag) {
+						json.html = await extractHtml(browser, htmlSelector);
+					}
+					out.push({ json: json as any, binary: { data: binary }, pairedItem: { item: i } });
+				} catch (e) {
+					if (e instanceof NodeOperationError || e instanceof NodeApiError) throw e;
+					throw new NodeApiError(this.getNode(), e as Error, { message: 'Captcha-protected scrape failed' });
+				} finally {
+					if (browser) {
+						try { await browser.close(); } catch { /* best-effort close */ }
+					}
+					try { await client.close(); } catch { /* best-effort close */ }
+				}
+				continue;
+			}
+
+			// === Screenshot in Geo (rent → navigate → screenshot → release) ===
+			if (op === 'screenshotGeo') {
+				const url = this.getNodeParameter('url', i) as string;
+				const geo = this.getNodeParameter('geo', i) as string;
+				const fullPage = this.getNodeParameter('fullPage', i) as boolean;
+				const maxPrice = this.getNodeParameter('maxPrice', i) as number;
+				try {
+					const list = await client.search({ geo, max_price_per_min: maxPrice });
+					if (!list.length) throw new NodeOperationError(this.getNode(), 'No browsers in geo ' + geo);
+					browser = await client.rent(list[0].schedule_id);
+					touchedSessions.add(browser.sessionId);
+					await browser.navigate(url);
+					const shot = await browser.screenshot({ format: 'base64', fullPage }) as any;
+					const binary = await this.helpers.prepareBinaryData(
+						Buffer.from(shot.data, 'base64'),
+						'screenshot.png',
+						'image/png',
+					);
+					out.push({
+						json: { url, geo, schedule_id: list[0].schedule_id },
+						binary: { data: binary },
+						pairedItem: { item: i },
+					});
+				} catch (e) {
+					if (e instanceof NodeOperationError || e instanceof NodeApiError) throw e;
+					throw new NodeApiError(this.getNode(), e as Error, { message: 'Screenshot in geo ' + geo + ' failed' });
+				} finally {
+					if (browser) {
+						try { await browser.close(); } catch { /* best-effort close */ }
+					}
+					try { await client.close(); } catch { /* best-effort close */ }
+				}
+				continue;
+			}
+
+			// === Contract operations (HTTP API, no WebSocket needed) ===
+			if (op.startsWith('contract_')) {
+				const contractClient = new ContractClient(token);
+				const pop = op.replace('contract_', '');
+				let result: unknown;
+				try {
+					switch (pop) {
+						case 'list':
+							result = await contractClient.listContracts();
+							break;
+						case 'tasks': {
+							const contractId = this.getNodeParameter('contractId', i) as number;
+							result = await contractClient.tasks(contractId);
+							break;
+						}
+						case 'get': {
+							const eventId = this.getNodeParameter('eventId', i) as number;
+							result = await contractClient.task(eventId);
+							break;
+						}
+						case 'myEvents':
+							result = await contractClient.myEvents();
+							break;
+						case 'create': {
+							const contractId = this.getNodeParameter('contractId', i) as number;
+							const label = this.getNodeParameter('label', i) as string;
+							const description = (this.getNodeParameter('description', i) as string) || '';
+							const status = this.getNodeParameter('status', i) as number;
+							const bType = this.getNodeParameter('benefitableType', i) as string;
+							const bValue = this.getNodeParameter('benefitableValue', i) as number;
+							result = await contractClient.create(contractId, {
+								label,
+								description: description || undefined,
+								status,
+								benefitable: bValue ? (bType + ':' + bValue) : undefined,
+							});
+							break;
+						}
+						case 'assign': {
+							const eventId = this.getNodeParameter('eventId', i) as number;
+							const bType = this.getNodeParameter('benefitableType', i) as string;
+							const bValue = this.getNodeParameter('benefitableValue', i) as number;
+							result = await contractClient.assign(eventId, bType + ':' + bValue);
+							break;
+						}
+						case 'setStatus': {
+							const eventId = this.getNodeParameter('eventId', i) as number;
+							const status = this.getNodeParameter('status', i) as number;
+							result = await contractClient.setStatus(eventId, status);
+							break;
+						}
+						case 'comment': {
+							const eventId = this.getNodeParameter('eventId', i) as number;
+							const text = (this.getNodeParameter('description', i) as string) || '';
+							result = await contractClient.comment(eventId, text);
+							break;
+						}
+						case 'progress': {
+							const eventId = this.getNodeParameter('eventId', i) as number;
+							const status = this.getNodeParameter('status', i) as number;
+							const desc = this.getNodeParameter('progressDesc', i) as string;
+							result = await contractClient.progress(eventId, status, desc);
+							break;
+						}
+						case 'callHuman': {
+							const eventId = this.getNodeParameter('eventId', i) as number;
+							const kind = this.getNodeParameter('callKind', i) as string;
+							const msg = this.getNodeParameter('callDesc', i) as string;
+							result = await contractClient.callHuman(eventId, kind, msg);
+							break;
+						}
+						case 'poll':
+							result = await contractClient.poll();
+							break;
+						default:
+							throw new NodeOperationError(this.getNode(), 'Unknown contract operation: ' + pop);
+					}
+					out.push({
+						json: result as any,
+						pairedItem: { item: i },
+					});
+				} catch (e) {
+					if (e instanceof NodeOperationError || e instanceof NodeApiError) throw e;
+					throw new NodeApiError(this.getNode(), e as Error, { message: 'Contract ' + pop + ' failed' });
 				}
 				continue;
 			}
@@ -414,7 +834,7 @@ export class BrowserCeki implements INodeType {
 			try {
 				browser = await client.resume(sessionId);
 			} catch (e) {
-				throw new Error(`Resume session "${sessionId}" failed: ${(e as Error).message}. Session may have expired or still be in grace.`);
+				throw new NodeApiError(this.getNode(), e as Error, { message: `Resume session "${sessionId}" failed. Session may have expired or still be in grace.` });
 			}
 			const sid = browser.sessionId;
 
@@ -423,9 +843,9 @@ export class BrowserCeki implements INodeType {
 					try {
 						const url = this.getNodeParameter('url', i) as string;
 						await browser.navigate(url);
-						out.push({ json: { session_id: sid, url } });
+						out.push({ json: { session_id: sid, url }, pairedItem: { item: i } });
 					} catch (e) {
-						throw new Error(`Navigate failed: ${(e as Error).message}`);
+						throw new NodeApiError(this.getNode(), e as Error, { message: 'Navigate failed' });
 					}
 					break;
 				}
@@ -434,9 +854,9 @@ export class BrowserCeki implements INodeType {
 						const x = this.getNodeParameter('x', i) as number;
 						const y = this.getNodeParameter('y', i) as number;
 						await browser.click(x, y);
-						out.push({ json: { session_id: sid, clicked: [x, y] } });
+						out.push({ json: { session_id: sid, clicked: [x, y] }, pairedItem: { item: i } });
 					} catch (e) {
-						throw new Error(`Click at (${x},${y}) failed: ${(e as Error).message}`);
+						throw new NodeApiError(this.getNode(), e as Error, { message: 'Click failed' });
 					}
 					break;
 				}
@@ -444,9 +864,9 @@ export class BrowserCeki implements INodeType {
 					try {
 						const text = this.getNodeParameter('text', i) as string;
 						await browser.type(text);
-						out.push({ json: { session_id: sid, typed: text } });
+						out.push({ json: { session_id: sid, typed: text }, pairedItem: { item: i } });
 					} catch (e) {
-						throw new Error(`Type failed: ${(e as Error).message}`);
+						throw new NodeApiError(this.getNode(), e as Error, { message: 'Type failed' });
 					}
 					break;
 				}
@@ -454,9 +874,9 @@ export class BrowserCeki implements INodeType {
 					try {
 						const deltaY = this.getNodeParameter('deltaY', i) as number;
 						await browser.scroll(deltaY);
-						out.push({ json: { session_id: sid, scrolled: deltaY } });
+						out.push({ json: { session_id: sid, scrolled: deltaY }, pairedItem: { item: i } });
 					} catch (e) {
-						throw new Error(`Scroll failed: ${(e as Error).message}`);
+						throw new NodeApiError(this.getNode(), e as Error, { message: 'Scroll failed' });
 					}
 					break;
 				}
@@ -471,9 +891,9 @@ export class BrowserCeki implements INodeType {
 							'screenshot.png',
 							'image/png',
 						);
-						out.push({ json: { session_id: sid }, binary: { data: binary } });
+						out.push({ json: { session_id: sid }, binary: { data: binary }, pairedItem: { item: i } });
 					} catch (e) {
-						throw new Error(`Screenshot failed: ${(e as Error).message}`);
+						throw new NodeApiError(this.getNode(), e as Error, { message: 'Screenshot failed' });
 					}
 					break;
 				}
@@ -482,16 +902,17 @@ export class BrowserCeki implements INodeType {
 						const snap = await browser.snapshot();
 						out.push({
 							json: { session_id: sid, screenshot: snap.screenshot },
+							pairedItem: { item: i },
 						});
 					} catch (e) {
-						throw new Error(`Snapshot failed: ${(e as Error).message}`);
+						throw new NodeApiError(this.getNode(), e as Error, { message: 'Snapshot failed' });
 					}
 					break;
 				}
 				case 'wait': {
 					const ms = this.getNodeParameter('ms', i) as number;
 					await sleep(ms);
-					out.push({ json: { session_id: sid, waited: ms } });
+					out.push({ json: { session_id: sid, waited: ms }, pairedItem: { item: i } });
 					break;
 				}
 				case 'waitForSelector': {
@@ -514,11 +935,11 @@ export class BrowserCeki implements INodeType {
 						await sleep(500);
 					}
 					if (!ok) {
-						throw new Error(
+						throw new NodeOperationError(this.getNode(),
 							`waitForSelector("${selector}") timed out after ${timeout}ms${lastErr ? `: ${(lastErr as Error).message}` : ''}`,
 						);
 					}
-					out.push({ json: { session_id: sid, selector, found: true } });
+					out.push({ json: { session_id: sid, selector, found: true }, pairedItem: { item: i } });
 					break;
 				}
 				case 'upload': {
@@ -526,15 +947,15 @@ export class BrowserCeki implements INodeType {
 						const selector = this.getNodeParameter('selector', i) as string;
 						const bpn = this.getNodeParameter('binaryPropertyName', i) as string;
 						const bin = items[i].binary?.[bpn];
-						if (!bin) throw new Error(`Binary property "${bpn}" not found on input`);
+						if (!bin) throw new NodeOperationError(this.getNode(), `Binary property "${bpn}" not found on input`);
 						const stream = await this.helpers.getBinaryStream(bin.id as string);
 						const chunks: Buffer[] = [];
 						for await (const c of stream) chunks.push(c as Buffer);
 						const buf = Buffer.concat(chunks);
 						const res = await browser.upload(selector, buf);
-						out.push({ json: { session_id: sid, uploaded: res } });
+						out.push({ json: { session_id: sid, uploaded: res }, pairedItem: { item: i } });
 					} catch (e) {
-						throw new Error(`Upload failed: ${(e as Error).message}`);
+						throw new NodeApiError(this.getNode(), e as Error, { message: 'Upload failed' });
 					}
 					break;
 				}
@@ -568,7 +989,7 @@ export class BrowserCeki implements INodeType {
 						stopWs.onerror = () => { abortTimer.removeEventListener("abort", onTimer); resolve(); };
 						stopWs.onclose = () => { abortTimer.removeEventListener("abort", onTimer); resolve(); };
 					});
-					out.push({ json: { closed: true, session_id: sessionId } });
+					out.push({ json: { closed: true, session_id: sessionId }, pairedItem: { item: i } });
 					break;
 				}
 			}

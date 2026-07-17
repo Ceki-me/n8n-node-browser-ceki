@@ -1,4 +1,4 @@
-# n8n-nodes-ceki
+# n8n-node-browser-ceki
 
 **Rent real human browsers inside your n8n workflows.**
 
@@ -14,11 +14,11 @@ All of the logic lives in [`@ceki/sdk`](https://www.npmjs.com/package/@ceki/sdk)
 
 ## Install
 
-**In self-hosted n8n:** Settings → Community Nodes → Install → `n8n-nodes-ceki`
+**In self-hosted n8n:** Settings → Community Nodes → Install → `n8n-node-browser-ceki`
 
 **Manually:**
 ```bash
-npm install n8n-nodes-ceki
+npm install n8n-node-browser-ceki
 ```
 
 ## Credential

@@ -23,6 +23,7 @@ __export(BrowserCeki_node_exports, {
   BrowserCeki: () => BrowserCeki
 });
 module.exports = __toCommonJS(BrowserCeki_node_exports);
+var import_n8n_workflow = require("n8n-workflow");
 
 // lib/ceki-client.ts
 function jsonParse(raw) {
@@ -370,9 +371,9 @@ var CekiBrowser = class {
   async navigate(url, timeoutMs) {
     await this.send("Page.navigate", { url }, timeoutMs);
   }
-  async click(x2, y2) {
-    await this.send("Input.dispatchMouseEvent", { type: "mousePressed", x: x2, y: y2, button: "left", clickCount: 1 });
-    await this.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: x2, y: y2, button: "left", clickCount: 1 });
+  async click(x, y) {
+    await this.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
+    await this.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
   }
   async type(text) {
     await this.send("Ceki.typeText", { text });
@@ -435,7 +436,180 @@ var CekiBrowser = class {
   }
 };
 
+// lib/contract-client.ts
+function cleanArgs(o) {
+  const out = { ...o };
+  for (const k of Object.keys(out)) {
+    if (out[k] === void 0 || out[k] === null) delete out[k];
+  }
+  return out;
+}
+function parseBenefitable(value) {
+  if (!value) return null;
+  const m = /^(agent|user):(\d+)$/.exec(value);
+  if (!m) return null;
+  return { type: m[1], value: Number(m[2]) };
+}
+function parseParticipant(value, roleId) {
+  const b = parseBenefitable(value);
+  if (!b) return null;
+  return { participable_id: b.value, type: b.type, role_id: roleId };
+}
+function deriveLabel(desc) {
+  if (!desc) return "";
+  const line = desc.split("\n")[0].trim();
+  return line.length > 60 ? line.slice(0, 57) + "..." : line;
+}
+var ROLE_REVIEWER = 5;
+var ROLE_QA = 6;
+var ContractClient = class {
+  constructor(token, endpoint, apiBase) {
+    this._endpoint = (endpoint ?? "https://api.ceki.me/mcp").replace(/\/+$/, "");
+    this._apiBase = (apiBase ?? "https://api.ceki.me").replace(/\/+$/, "");
+    this._token = token;
+  }
+  _headers() {
+    return {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      Authorization: `Bearer ${this._token}`
+    };
+  }
+  async _rpc(method, params) {
+    const body = JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method, params });
+    const resp = await fetch(this._endpoint, {
+      method: "POST",
+      headers: this._headers(),
+      body
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => "");
+      throw new Error(`HTTP ${resp.status}: ${text.slice(0, 400)}`);
+    }
+    return resp.json();
+  }
+  async _call(tool, args) {
+    const body = await this._rpc("tools/call", { name: tool, arguments: args ?? {} });
+    if (body.error) throw new Error(`${tool} \u2192 ${JSON.stringify(body.error).slice(0, 400)}`);
+    const result = body.result ?? {};
+    const content = result.content;
+    if (Array.isArray(content)) {
+      const texts = content.filter((c) => c.type === "text").map((c) => String(c.text ?? ""));
+      const joined = texts.join("\n");
+      try {
+        return JSON.parse(joined);
+      } catch {
+        return joined;
+      }
+    }
+    if (result.structuredContent !== void 0) return result.structuredContent;
+    return result;
+  }
+  // ── domain methods ─────────────────────────────────────────
+  async listContracts() {
+    return this._call("list-contracts");
+  }
+  async members(contractId) {
+    return this._call("contract-members", { contract_id: contractId });
+  }
+  async tasks(contractId) {
+    return this._call("contract-tasks", { contract_id: contractId });
+  }
+  async myEvents() {
+    return this._call("get-my-events");
+  }
+  async task(eventId) {
+    return this._call("get-event", { event_id: eventId });
+  }
+  async create(contractId, opts) {
+    const args = cleanArgs({
+      contract_id: contractId,
+      label: opts.label,
+      type_id: opts.type,
+      status_id: opts.status,
+      description: opts.description,
+      benefitable: opts.benefitable ? parseBenefitable(opts.benefitable) : void 0
+    });
+    const users = [];
+    const rev = parseParticipant(opts.reviewer, ROLE_REVIEWER);
+    if (rev) users.push(rev);
+    const qa = parseParticipant(opts.qa, ROLE_QA);
+    if (qa) users.push(qa);
+    if (users.length) args.users = users;
+    return this._call("create-contract-event", args);
+  }
+  async propose(eventId, opts) {
+    return this._call("propose-correction", cleanArgs({
+      event_id: eventId,
+      status_id: opts.status,
+      label: opts.label,
+      description: opts.description,
+      benefitable: opts.benefitable ? parseBenefitable(opts.benefitable) : void 0
+    }));
+  }
+  async comment(eventId, opts) {
+    return this._call("comment", cleanArgs({
+      event_id: eventId,
+      label: opts?.label,
+      description: opts?.description
+    }));
+  }
+  async progress(eventId, opts) {
+    let statusResult = null;
+    if (opts.status != null) {
+      statusResult = await this.propose(eventId, { status: opts.status });
+    }
+    const commentResult = await this.comment(eventId, { label: deriveLabel(opts.desc), description: opts.desc });
+    return { status_correction: statusResult, comment: commentResult };
+  }
+  async callHuman(eventId, kind, desc) {
+    if (!["input", "review", "stuck"].includes(kind)) throw new Error(`kind must be input|review|stuck, got ${kind}`);
+    return this._call("call-human", { event_id: eventId, kind, desc });
+  }
+  /** GET /agent/polling. Returns [] on 429. */
+  async poll() {
+    const resp = await fetch(`${this._apiBase}/agent/polling`, {
+      headers: { Accept: "application/json", Authorization: `Bearer ${this._token}` }
+    });
+    if (resp.status === 429) return [];
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => "");
+      throw new Error(`poll HTTP ${resp.status}: ${text.slice(0, 300)}`);
+    }
+    const body = await resp.json();
+    if (Array.isArray(body)) return body;
+    if (body && typeof body === "object") {
+      for (const k of ["notifications", "data", "items"]) {
+        if (Array.isArray(body[k])) return body[k];
+      }
+    }
+    return [];
+  }
+};
+
 // nodes/BrowserCeki/BrowserCeki.node.ts
+async function waitForSelector(browser, selector, timeoutMs, intervalMs = 500) {
+  const expr = `!!document.querySelector(${JSON.stringify(selector)})`;
+  const deadline = Date.now() + timeoutMs;
+  let lastErr = null;
+  while (Date.now() < deadline) {
+    try {
+      const res = await browser.send("Runtime.evaluate", { expression: expr, returnByValue: true });
+      if (res?.result?.value === true) return true;
+    } catch (e) {
+      lastErr = e;
+    }
+    await sleep(intervalMs);
+  }
+  throw new Error(
+    `waitForSelector("${selector}") timed out after ${timeoutMs}ms${lastErr ? ": " + lastErr.message : ""}`
+  );
+}
+async function extractHtml(browser, selector) {
+  const expr = selector.trim() === "" || selector === "body" ? "document.body ? document.body.outerHTML : ''" : "(function(){ var el = document.querySelector(" + JSON.stringify(selector) + "); return el ? el.outerHTML : ''; })()";
+  const res = await browser.send("Runtime.evaluate", { expression: expr, returnByValue: true });
+  return res?.result?.value ?? "";
+}
 var sleep = (ms) => new Promise((resolve) => {
   AbortSignal.timeout(ms).addEventListener("abort", () => resolve(), { once: true });
 });
@@ -444,14 +618,15 @@ var BrowserCeki = class {
     this.description = {
       displayName: "Browser Ceki",
       name: "browserCeki",
-      icon: "file:ceki.png",
+      icon: { light: "file:ceki-light.svg", dark: "file:ceki-dark.svg" },
       group: ["transform"],
       version: 1,
+      usableAsTool: true,
       subtitle: '={{ "Ceki: " + $parameter.operation }}',
       description: "Rent a real human browser and control it: rent, navigate, click, type, screenshot, solve captchas, and more",
       defaults: { name: "Browser Ceki" },
-      inputs: ["main"],
-      outputs: ["main"],
+      inputs: [import_n8n_workflow.NodeConnectionTypes.Main],
+      outputs: [import_n8n_workflow.NodeConnectionTypes.Main],
       credentials: [{ name: "cekiApi", required: true }],
       properties: [
         {
@@ -459,22 +634,38 @@ var BrowserCeki = class {
           name: "operation",
           type: "options",
           default: "search",
+          noDataExpression: true,
           options: [
-            { name: "Search", value: "search" },
-            { name: "Rent", value: "rent" },
-            { name: "Navigate", value: "navigate" },
+            // Browser operations
+            { name: "Captcha-Protected Scrape", value: "captchaScrape" },
             { name: "Click", value: "click" },
-            { name: "Type", value: "type" },
-            { name: "Scroll", value: "scroll" },
-            { name: "Screenshot", value: "screenshot" },
-            { name: "Snapshot", value: "snapshot" },
-            { name: "Wait", value: "wait" },
-            { name: "Wait for Selector", value: "waitForSelector" },
-            { name: "Upload", value: "upload" },
             { name: "Close", value: "close" },
             { name: "Full: Rent \u2192 Navigate \u2192 Screenshot", value: "full" },
             { name: "My Sessions", value: "my_sessions" },
-            { name: "Stop Session", value: "stop_session" }
+            { name: "Navigate", value: "navigate" },
+            { name: "Rent", value: "rent" },
+            { name: "Screenshot", value: "screenshot" },
+            { name: "Screenshot in Geo", value: "screenshotGeo" },
+            { name: "Scroll", value: "scroll" },
+            { name: "Search", value: "search" },
+            { name: "Snapshot", value: "snapshot" },
+            { name: "Stop Session", value: "stop_session" },
+            { name: "Type", value: "type" },
+            { name: "Upload", value: "upload" },
+            { name: "Wait", value: "wait" },
+            { name: "Wait for Selector", value: "waitForSelector" },
+            // Contract operations
+            { name: "Contract: Assign Executor", value: "contract_assign" },
+            { name: "Contract: Call Human", value: "contract_callHuman" },
+            { name: "Contract: Comment", value: "contract_comment" },
+            { name: "Contract: Create Task", value: "contract_create" },
+            { name: "Contract: Get Task", value: "contract_get" },
+            { name: "Contract: List My Contracts", value: "contract_list" },
+            { name: "Contract: List Tasks in Contract", value: "contract_tasks" },
+            { name: "Contract: My Assigned Events", value: "contract_myEvents" },
+            { name: "Contract: Poll Notifications", value: "contract_poll" },
+            { name: "Contract: Progress Report", value: "contract_progress" },
+            { name: "Contract: Update Status", value: "contract_setStatus" }
           ]
         },
         // === Rent: rental parameters ===
@@ -492,7 +683,7 @@ var BrowserCeki = class {
           type: "string",
           default: "",
           placeholder: "RU, EE, US\u2026",
-          displayOptions: { show: { operation: ["search"] } }
+          displayOptions: { show: { operation: ["search", "captchaScrape", "screenshotGeo"] } }
         },
         {
           displayName: "Max $/min",
@@ -500,17 +691,17 @@ var BrowserCeki = class {
           type: "number",
           typeOptions: { numberPrecision: 4 },
           default: 0.02,
-          displayOptions: { show: { operation: ["search"] } }
+          displayOptions: { show: { operation: ["search", "captchaScrape", "screenshotGeo"] } }
         },
         {
-          displayName: "Min rating",
+          displayName: "Min Rating",
           name: "minRating",
           type: "number",
           default: 0,
-          displayOptions: { show: { operation: ["search"] } }
+          displayOptions: { show: { operation: ["search", "captchaScrape", "screenshotGeo"] } }
         },
         {
-          displayName: "Profile mode",
+          displayName: "Profile Mode",
           name: "mode",
           type: "options",
           default: "incognito",
@@ -529,12 +720,210 @@ var BrowserCeki = class {
           displayOptions: { show: { operation: ["navigate", "full"] } }
         },
         {
-          displayName: "Demo mode (no browser needed)",
+          displayName: "Demo Mode (No Browser Needed)",
           name: "demoMode",
           type: "boolean",
           default: true,
-          description: "Skip actual browser rent and generate demo output",
+          description: "Whether to skip actual browser rent and generate demo output",
           displayOptions: { show: { operation: ["full"] } }
+        },
+        // === Captcha-protected Scrape params ===
+        {
+          displayName: "Captcha URL",
+          name: "url",
+          type: "string",
+          default: "https://example.com",
+          required: true,
+          description: "Page protected by anti-bot / captcha",
+          displayOptions: { show: { operation: ["captchaScrape"] } }
+        },
+        {
+          displayName: "Geo",
+          name: "geo",
+          type: "string",
+          default: "RU",
+          placeholder: "RU, EE, US\u2026",
+          displayOptions: { show: { operation: ["captchaScrape"] } }
+        },
+        {
+          displayName: "Max $/min",
+          name: "maxPrice",
+          type: "number",
+          typeOptions: { numberPrecision: 4 },
+          default: 0.02,
+          displayOptions: { show: { operation: ["captchaScrape"] } }
+        },
+        {
+          displayName: "Wait for Selector",
+          name: "waitSelector",
+          type: "string",
+          default: "",
+          placeholder: "CSS selector (optional)",
+          description: "Wait until this selector appears in the DOM",
+          displayOptions: { show: { operation: ["captchaScrape"] } }
+        },
+        {
+          displayName: "Wait Timeout (ms)",
+          name: "waitTimeout",
+          type: "number",
+          default: 3e4,
+          displayOptions: { show: { operation: ["captchaScrape"] } }
+        },
+        {
+          displayName: "Extract HTML",
+          name: "extractHtml",
+          type: "boolean",
+          default: true,
+          displayOptions: { show: { operation: ["captchaScrape"] } }
+        },
+        {
+          displayName: "HTML Selector",
+          name: "htmlSelector",
+          type: "string",
+          default: "body",
+          placeholder: 'CSS selector or "body"',
+          description: "OuterHTML of this selector is returned as html",
+          displayOptions: { show: { operation: ["captchaScrape"] } }
+        },
+        {
+          displayName: "Full Page Screenshot",
+          name: "fullPage",
+          type: "boolean",
+          default: false,
+          displayOptions: { show: { operation: ["captchaScrape"] } }
+        },
+        // === Screenshot in Geo params ===
+        {
+          displayName: "Geo URL",
+          name: "url",
+          type: "string",
+          default: "https://ifconfig.me",
+          required: true,
+          displayOptions: { show: { operation: ["screenshotGeo"] } }
+        },
+        {
+          displayName: "Geo",
+          name: "geo",
+          type: "string",
+          default: "RU",
+          placeholder: "RU, EE, US\u2026",
+          displayOptions: { show: { operation: ["screenshotGeo"] } }
+        },
+        {
+          displayName: "Full Page Screenshot",
+          name: "fullPage",
+          type: "boolean",
+          default: false,
+          displayOptions: { show: { operation: ["screenshotGeo"] } }
+        },
+        {
+          displayName: "Max $/min",
+          name: "maxPrice",
+          type: "number",
+          default: 0.02,
+          displayOptions: { show: { operation: ["screenshotGeo"] } }
+        },
+        // === Contract params ===
+        {
+          displayName: "Contract ID",
+          name: "contractId",
+          type: "number",
+          default: 0,
+          description: "Ceki contract ID",
+          displayOptions: { show: { operation: ["contract_tasks", "contract_create"] } }
+        },
+        {
+          displayName: "Event ID",
+          name: "eventId",
+          type: "number",
+          default: 0,
+          description: "Task / event ID (KalEvent)",
+          displayOptions: {
+            show: { operation: ["contract_get", "contract_assign", "contract_setStatus", "contract_comment", "contract_progress", "contract_callHuman"] }
+          }
+        },
+        {
+          displayName: "Label",
+          name: "label",
+          type: "string",
+          default: "",
+          required: true,
+          displayOptions: { show: { operation: ["contract_create"] } }
+        },
+        {
+          displayName: "Description",
+          name: "description",
+          type: "string",
+          typeOptions: { rows: 4 },
+          default: "",
+          displayOptions: { show: { operation: ["contract_create", "contract_comment"] } }
+        },
+        {
+          displayName: "Executor Type",
+          name: "benefitableType",
+          type: "options",
+          default: "agent",
+          options: [
+            { name: "Agent", value: "agent" },
+            { name: "User (Human)", value: "user" }
+          ],
+          displayOptions: { show: { operation: ["contract_create", "contract_assign"] } }
+        },
+        {
+          displayName: "Executor ID",
+          name: "benefitableValue",
+          type: "number",
+          default: 0,
+          description: "Agent ID or user ID of the executor",
+          displayOptions: { show: { operation: ["contract_create", "contract_assign"] } }
+        },
+        {
+          displayName: "Status",
+          name: "status",
+          type: "options",
+          options: [
+            { name: "100 \xB7 Backlog", value: 100 },
+            { name: "200 \xB7 Hand (Assigned)", value: 200 },
+            { name: "222 \xB7 Hand Done", value: 222 },
+            { name: "300 \xB7 QA", value: 300 },
+            { name: "350 \xB7 QA Done", value: 350 },
+            { name: "499 \xB7 Reviewer", value: 499 }
+          ],
+          default: 200,
+          displayOptions: { show: { operation: ["contract_create", "contract_setStatus", "contract_progress"] } }
+        },
+        {
+          displayName: "Progress Description",
+          name: "progressDesc",
+          type: "string",
+          typeOptions: { rows: 4 },
+          default: "",
+          required: true,
+          description: "Body of the progress comment (does not overwrite the task spec)",
+          displayOptions: { show: { operation: ["contract_progress"] } }
+        },
+        {
+          displayName: "Call Kind",
+          name: "callKind",
+          type: "options",
+          default: "review",
+          options: [
+            { name: "Input (Need Clarification)", value: "input" },
+            { name: "Review (Done, Take a Look)", value: "review" },
+            { name: "Stuck (Blocked)", value: "stuck" }
+          ],
+          description: "Type of escalation to a human (the call-human action)",
+          displayOptions: { show: { operation: ["contract_callHuman"] } }
+        },
+        {
+          displayName: "Message",
+          name: "callDesc",
+          type: "string",
+          typeOptions: { rows: 4 },
+          default: "",
+          required: true,
+          description: "What to tell the human \u2014 context, question, or what was done",
+          displayOptions: { show: { operation: ["contract_callHuman"] } }
         },
         // === Operations: session_id ===
         {
@@ -695,7 +1084,7 @@ var BrowserCeki = class {
         geo: geo || void 0,
         max_price_per_min: maxPrice
       });
-      if (!list.length) throw new Error("No browsers found by filters");
+      if (!list.length) throw new import_n8n_workflow.NodeOperationError(this.getNode(), "No browsers found by filters");
       return list[0].schedule_id;
     };
     let _execErr = null;
@@ -713,10 +1102,11 @@ var BrowserCeki = class {
               const mode = this.getNodeParameter("mode", i);
               browser = await client.rent(sid2, { mode });
               out.push({
-                json: { session_id: browser.sessionId, schedule_id: sid2, mode }
+                json: { session_id: browser.sessionId, schedule_id: sid2, mode },
+                pairedItem: { item: i }
               });
             } catch (e) {
-              throw new Error(`Rent failed: ${e.message}`);
+              throw new import_n8n_workflow.NodeApiError(this.getNode(), e, { message: "Rent failed" });
             } finally {
               await client.disconnect();
             }
@@ -730,9 +1120,9 @@ var BrowserCeki = class {
                 geo: geo || void 0,
                 max_price_per_min: maxPrice
               });
-              out.push({ json: { browsers: list, count: list.length } });
+              out.push({ json: { browsers: list, count: list.length }, pairedItem: { item: i } });
             } catch (e) {
-              throw new Error(`Search failed: ${e.message}`);
+              throw new import_n8n_workflow.NodeApiError(this.getNode(), e, { message: "Search failed" });
             } finally {
               await client.disconnect();
             }
@@ -743,12 +1133,12 @@ var BrowserCeki = class {
               const resp = await fetch("https://api.ceki.me/api/agent/sessions", {
                 headers: { Authorization: `Bearer ${token}` }
               });
-              if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+              if (!resp.ok) throw new import_n8n_workflow.NodeApiError(this.getNode(), void 0, { message: `HTTP ${resp.status}`, httpCode: `${resp.status}` });
               const body = await resp.json();
               const sessions = body.data ?? [];
-              out.push({ json: { sessions, count: sessions.length } });
+              out.push({ json: { sessions, count: sessions.length }, pairedItem: { item: i } });
             } catch (e) {
-              throw new Error(`My sessions failed: ${e.message}`);
+              throw new import_n8n_workflow.NodeApiError(this.getNode(), e, { message: "My sessions failed" });
             }
             continue;
           }
@@ -763,7 +1153,7 @@ var BrowserCeki = class {
                     ws.close();
                   } catch {
                   }
-                  reject(new Error("Stop session timed out"));
+                  reject(new import_n8n_workflow.NodeApiError(this.getNode(), void 0, { message: "Stop session timed out" }));
                 }, { once: true });
                 ws.onopen = () => {
                   ws.send(JSON.stringify({ type: "stop", session_id: sessionId2, reason: "n8n stop_session" }));
@@ -779,12 +1169,12 @@ var BrowserCeki = class {
                   }
                 };
                 ws.onerror = () => {
-                  reject(new Error("WebSocket connection failed"));
+                  reject(new import_n8n_workflow.NodeApiError(this.getNode(), void 0, { message: "WebSocket connection failed" }));
                 };
               });
-              out.push({ json: { stopped: true, session_id: sessionId2 } });
+              out.push({ json: { stopped: true, session_id: sessionId2 }, pairedItem: { item: i } });
             } catch (e) {
-              throw new Error(`Stop session failed: ${e.message}`);
+              throw new import_n8n_workflow.NodeApiError(this.getNode(), e, { message: "Stop session failed" });
             }
             continue;
           }
@@ -797,7 +1187,7 @@ var BrowserCeki = class {
               try {
                 sid2 = await resolveSid(i, client);
               } catch (e) {
-                throw new Error(`Full: resolve schedule failed: ${e.message}`);
+                throw new import_n8n_workflow.NodeApiError(this.getNode(), e, { message: "Full: resolve schedule failed" });
               }
             }
             const mode = this.getNodeParameter("mode", i);
@@ -821,7 +1211,7 @@ var BrowserCeki = class {
                   binary = await this.helpers.prepareBinaryData(Buffer.from(data, "base64"), "screenshot.png", "image/png");
                   await browser.close();
                 } catch (e) {
-                  throw new Error(`Full op failed at step "${browser?.sessionId ? "navigate/screenshot" : "rent"}": ${e.message}`);
+                  throw new import_n8n_workflow.NodeApiError(this.getNode(), e, { message: "Full op failed" });
                 }
               }
               out.push({
@@ -832,7 +1222,8 @@ var BrowserCeki = class {
                   url,
                   waited: ms
                 },
-                binary: { data: binary }
+                binary: { data: binary },
+                pairedItem: { item: i }
               });
             } finally {
               await client.close().catch(() => {
@@ -840,11 +1231,189 @@ var BrowserCeki = class {
             }
             continue;
           }
+          if (op === "captchaScrape") {
+            const url = this.getNodeParameter("url", i);
+            const geo = this.getNodeParameter("geo", i);
+            const maxPrice = this.getNodeParameter("maxPrice", i);
+            const waitSelector = this.getNodeParameter("waitSelector", i) || "";
+            const waitTimeout = this.getNodeParameter("waitTimeout", i);
+            const extractHtmlFlag = this.getNodeParameter("extractHtml", i);
+            const htmlSelector = this.getNodeParameter("htmlSelector", i) || "body";
+            const fullPage = this.getNodeParameter("fullPage", i);
+            let scheduleId = 0;
+            try {
+              const list = await client.search({ geo: geo || void 0, max_price_per_min: maxPrice });
+              if (!list.length) throw new import_n8n_workflow.NodeOperationError(this.getNode(), "No browsers in geo " + (geo || "*"));
+              scheduleId = list[0].schedule_id;
+              browser = await client.rent(scheduleId);
+              touchedSessions.add(browser.sessionId);
+              await browser.navigate(url);
+              if (waitSelector) {
+                await waitForSelector(browser, waitSelector, waitTimeout);
+              }
+              const shot = await browser.screenshot({ format: "base64", fullPage });
+              const data = shot.data ?? (shot instanceof Buffer ? shot.toString("base64") : "");
+              const binary = await this.helpers.prepareBinaryData(
+                Buffer.from(data, "base64"),
+                "captcha-scrape.png",
+                "image/png"
+              );
+              const json = {
+                url,
+                geo,
+                schedule_id: scheduleId
+              };
+              if (extractHtmlFlag) {
+                json.html = await extractHtml(browser, htmlSelector);
+              }
+              out.push({ json, binary: { data: binary }, pairedItem: { item: i } });
+            } catch (e) {
+              if (e instanceof import_n8n_workflow.NodeOperationError || e instanceof import_n8n_workflow.NodeApiError) throw e;
+              throw new import_n8n_workflow.NodeApiError(this.getNode(), e, { message: "Captcha-protected scrape failed" });
+            } finally {
+              if (browser) {
+                try {
+                  await browser.close();
+                } catch {
+                }
+              }
+              try {
+                await client.close();
+              } catch {
+              }
+            }
+            continue;
+          }
+          if (op === "screenshotGeo") {
+            const url = this.getNodeParameter("url", i);
+            const geo = this.getNodeParameter("geo", i);
+            const fullPage = this.getNodeParameter("fullPage", i);
+            const maxPrice = this.getNodeParameter("maxPrice", i);
+            try {
+              const list = await client.search({ geo, max_price_per_min: maxPrice });
+              if (!list.length) throw new import_n8n_workflow.NodeOperationError(this.getNode(), "No browsers in geo " + geo);
+              browser = await client.rent(list[0].schedule_id);
+              touchedSessions.add(browser.sessionId);
+              await browser.navigate(url);
+              const shot = await browser.screenshot({ format: "base64", fullPage });
+              const binary = await this.helpers.prepareBinaryData(
+                Buffer.from(shot.data, "base64"),
+                "screenshot.png",
+                "image/png"
+              );
+              out.push({
+                json: { url, geo, schedule_id: list[0].schedule_id },
+                binary: { data: binary },
+                pairedItem: { item: i }
+              });
+            } catch (e) {
+              if (e instanceof import_n8n_workflow.NodeOperationError || e instanceof import_n8n_workflow.NodeApiError) throw e;
+              throw new import_n8n_workflow.NodeApiError(this.getNode(), e, { message: "Screenshot in geo " + geo + " failed" });
+            } finally {
+              if (browser) {
+                try {
+                  await browser.close();
+                } catch {
+                }
+              }
+              try {
+                await client.close();
+              } catch {
+              }
+            }
+            continue;
+          }
+          if (op.startsWith("contract_")) {
+            const contractClient = new ContractClient(token);
+            const pop = op.replace("contract_", "");
+            let result;
+            try {
+              switch (pop) {
+                case "list":
+                  result = await contractClient.listContracts();
+                  break;
+                case "tasks": {
+                  const contractId = this.getNodeParameter("contractId", i);
+                  result = await contractClient.tasks(contractId);
+                  break;
+                }
+                case "get": {
+                  const eventId = this.getNodeParameter("eventId", i);
+                  result = await contractClient.task(eventId);
+                  break;
+                }
+                case "myEvents":
+                  result = await contractClient.myEvents();
+                  break;
+                case "create": {
+                  const contractId = this.getNodeParameter("contractId", i);
+                  const label = this.getNodeParameter("label", i);
+                  const description = this.getNodeParameter("description", i) || "";
+                  const status = this.getNodeParameter("status", i);
+                  const bType = this.getNodeParameter("benefitableType", i);
+                  const bValue = this.getNodeParameter("benefitableValue", i);
+                  result = await contractClient.create(contractId, {
+                    label,
+                    description: description || void 0,
+                    status,
+                    benefitable: bValue ? bType + ":" + bValue : void 0
+                  });
+                  break;
+                }
+                case "assign": {
+                  const eventId = this.getNodeParameter("eventId", i);
+                  const bType = this.getNodeParameter("benefitableType", i);
+                  const bValue = this.getNodeParameter("benefitableValue", i);
+                  result = await contractClient.assign(eventId, bType + ":" + bValue);
+                  break;
+                }
+                case "setStatus": {
+                  const eventId = this.getNodeParameter("eventId", i);
+                  const status = this.getNodeParameter("status", i);
+                  result = await contractClient.setStatus(eventId, status);
+                  break;
+                }
+                case "comment": {
+                  const eventId = this.getNodeParameter("eventId", i);
+                  const text = this.getNodeParameter("description", i) || "";
+                  result = await contractClient.comment(eventId, text);
+                  break;
+                }
+                case "progress": {
+                  const eventId = this.getNodeParameter("eventId", i);
+                  const status = this.getNodeParameter("status", i);
+                  const desc = this.getNodeParameter("progressDesc", i);
+                  result = await contractClient.progress(eventId, status, desc);
+                  break;
+                }
+                case "callHuman": {
+                  const eventId = this.getNodeParameter("eventId", i);
+                  const kind = this.getNodeParameter("callKind", i);
+                  const msg = this.getNodeParameter("callDesc", i);
+                  result = await contractClient.callHuman(eventId, kind, msg);
+                  break;
+                }
+                case "poll":
+                  result = await contractClient.poll();
+                  break;
+                default:
+                  throw new import_n8n_workflow.NodeOperationError(this.getNode(), "Unknown contract operation: " + pop);
+              }
+              out.push({
+                json: result,
+                pairedItem: { item: i }
+              });
+            } catch (e) {
+              if (e instanceof import_n8n_workflow.NodeOperationError || e instanceof import_n8n_workflow.NodeApiError) throw e;
+              throw new import_n8n_workflow.NodeApiError(this.getNode(), e, { message: "Contract " + pop + " failed" });
+            }
+            continue;
+          }
           const sessionId = this.getNodeParameter("sessionId", i);
           try {
             browser = await client.resume(sessionId);
           } catch (e) {
-            throw new Error(`Resume session "${sessionId}" failed: ${e.message}. Session may have expired or still be in grace.`);
+            throw new import_n8n_workflow.NodeApiError(this.getNode(), e, { message: `Resume session "${sessionId}" failed. Session may have expired or still be in grace.` });
           }
           const sid = browser.sessionId;
           switch (op) {
@@ -852,20 +1421,20 @@ var BrowserCeki = class {
               try {
                 const url = this.getNodeParameter("url", i);
                 await browser.navigate(url);
-                out.push({ json: { session_id: sid, url } });
+                out.push({ json: { session_id: sid, url }, pairedItem: { item: i } });
               } catch (e) {
-                throw new Error(`Navigate failed: ${e.message}`);
+                throw new import_n8n_workflow.NodeApiError(this.getNode(), e, { message: "Navigate failed" });
               }
               break;
             }
             case "click": {
               try {
-                const x2 = this.getNodeParameter("x", i);
-                const y2 = this.getNodeParameter("y", i);
-                await browser.click(x2, y2);
-                out.push({ json: { session_id: sid, clicked: [x2, y2] } });
+                const x = this.getNodeParameter("x", i);
+                const y = this.getNodeParameter("y", i);
+                await browser.click(x, y);
+                out.push({ json: { session_id: sid, clicked: [x, y] }, pairedItem: { item: i } });
               } catch (e) {
-                throw new Error(`Click at (${x},${y}) failed: ${e.message}`);
+                throw new import_n8n_workflow.NodeApiError(this.getNode(), e, { message: "Click failed" });
               }
               break;
             }
@@ -873,9 +1442,9 @@ var BrowserCeki = class {
               try {
                 const text = this.getNodeParameter("text", i);
                 await browser.type(text);
-                out.push({ json: { session_id: sid, typed: text } });
+                out.push({ json: { session_id: sid, typed: text }, pairedItem: { item: i } });
               } catch (e) {
-                throw new Error(`Type failed: ${e.message}`);
+                throw new import_n8n_workflow.NodeApiError(this.getNode(), e, { message: "Type failed" });
               }
               break;
             }
@@ -883,9 +1452,9 @@ var BrowserCeki = class {
               try {
                 const deltaY = this.getNodeParameter("deltaY", i);
                 await browser.scroll(deltaY);
-                out.push({ json: { session_id: sid, scrolled: deltaY } });
+                out.push({ json: { session_id: sid, scrolled: deltaY }, pairedItem: { item: i } });
               } catch (e) {
-                throw new Error(`Scroll failed: ${e.message}`);
+                throw new import_n8n_workflow.NodeApiError(this.getNode(), e, { message: "Scroll failed" });
               }
               break;
             }
@@ -900,9 +1469,9 @@ var BrowserCeki = class {
                   "screenshot.png",
                   "image/png"
                 );
-                out.push({ json: { session_id: sid }, binary: { data: binary } });
+                out.push({ json: { session_id: sid }, binary: { data: binary }, pairedItem: { item: i } });
               } catch (e) {
-                throw new Error(`Screenshot failed: ${e.message}`);
+                throw new import_n8n_workflow.NodeApiError(this.getNode(), e, { message: "Screenshot failed" });
               }
               break;
             }
@@ -910,17 +1479,18 @@ var BrowserCeki = class {
               try {
                 const snap = await browser.snapshot();
                 out.push({
-                  json: { session_id: sid, screenshot: snap.screenshot }
+                  json: { session_id: sid, screenshot: snap.screenshot },
+                  pairedItem: { item: i }
                 });
               } catch (e) {
-                throw new Error(`Snapshot failed: ${e.message}`);
+                throw new import_n8n_workflow.NodeApiError(this.getNode(), e, { message: "Snapshot failed" });
               }
               break;
             }
             case "wait": {
               const ms = this.getNodeParameter("ms", i);
               await sleep(ms);
-              out.push({ json: { session_id: sid, waited: ms } });
+              out.push({ json: { session_id: sid, waited: ms }, pairedItem: { item: i } });
               break;
             }
             case "waitForSelector": {
@@ -943,11 +1513,12 @@ var BrowserCeki = class {
                 await sleep(500);
               }
               if (!ok) {
-                throw new Error(
+                throw new import_n8n_workflow.NodeOperationError(
+                  this.getNode(),
                   `waitForSelector("${selector}") timed out after ${timeout}ms${lastErr ? `: ${lastErr.message}` : ""}`
                 );
               }
-              out.push({ json: { session_id: sid, selector, found: true } });
+              out.push({ json: { session_id: sid, selector, found: true }, pairedItem: { item: i } });
               break;
             }
             case "upload": {
@@ -955,15 +1526,15 @@ var BrowserCeki = class {
                 const selector = this.getNodeParameter("selector", i);
                 const bpn = this.getNodeParameter("binaryPropertyName", i);
                 const bin = items[i].binary?.[bpn];
-                if (!bin) throw new Error(`Binary property "${bpn}" not found on input`);
+                if (!bin) throw new import_n8n_workflow.NodeOperationError(this.getNode(), `Binary property "${bpn}" not found on input`);
                 const stream = await this.helpers.getBinaryStream(bin.id);
                 const chunks = [];
                 for await (const c of stream) chunks.push(c);
                 const buf = Buffer.concat(chunks);
                 const res = await browser.upload(selector, buf);
-                out.push({ json: { session_id: sid, uploaded: res } });
+                out.push({ json: { session_id: sid, uploaded: res }, pairedItem: { item: i } });
               } catch (e) {
-                throw new Error(`Upload failed: ${e.message}`);
+                throw new import_n8n_workflow.NodeApiError(this.getNode(), e, { message: "Upload failed" });
               }
               break;
             }
@@ -1010,7 +1581,7 @@ var BrowserCeki = class {
                   resolve();
                 };
               });
-              out.push({ json: { closed: true, session_id: sessionId } });
+              out.push({ json: { closed: true, session_id: sessionId }, pairedItem: { item: i } });
               break;
             }
           }
