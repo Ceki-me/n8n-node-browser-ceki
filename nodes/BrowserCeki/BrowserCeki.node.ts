@@ -240,6 +240,20 @@ export class BrowserCeki implements INodeType {
 		const creds = await this.getCredentials('cekiApi');
 		const token = creds.token as string;
 
+		const touchedSessions = new Set<string>();
+		const _stopSession = async (sid: string): Promise<void> => {
+			await new Promise<void>((resolve) => {
+				const stopWs = new WebSocket('wss://browser.ceki.me/ws/agent', ['bearer.' + token]);
+				const _t = AbortSignal.timeout(10000);
+				const _done = () => { try { stopWs.close(); } catch {} resolve(); };
+				_t.addEventListener('abort', _done, { once: true });
+				stopWs.onopen = () => { try { stopWs.send(JSON.stringify({ type: 'stop', session_id: sid, reason: 'n8n error' })); } catch {} };
+				stopWs.onmessage = (ev) => { try { const m = JSON.parse(ev.data as string); if (m.type === 'session_ended') { _t.removeEventListener('abort', _done); _done(); } } catch {} };
+				stopWs.onerror = _done;
+				stopWs.onclose = _done;
+			});
+		};
+
 		const resolveSid = async (i: number, client: CekiClient) => {
 			const scheduleId = this.getNodeParameter('scheduleId', i) as number;
 			if (scheduleId) return scheduleId;
@@ -253,6 +267,8 @@ export class BrowserCeki implements INodeType {
 			return list[0].schedule_id;
 		};
 
+		let _execErr: Error | null = null;
+		try {
 		for (let i = 0; i < items.length; i++) {
 			const op = this.getNodeParameter('operation', i) as string;
 			const client = new CekiClient(token);
@@ -570,6 +586,13 @@ export class BrowserCeki implements INodeType {
 				}
 			}
 		}
+		} catch (e) { _execErr = e as Error; }
+		if (_execErr && touchedSessions.size) {
+			for (const sid of touchedSessions) {
+				try { await _stopSession(sid); } catch {}
+			}
+		}
+		if (_execErr) throw _execErr;
 		return [out];
 	}
 }
