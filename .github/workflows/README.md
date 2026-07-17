@@ -3,7 +3,7 @@
 ## One-time setup
 
 1. Go to [npmjs.com](https://npmjs.com) → Account Settings → **Access Tokens**
-2. Create an **Automation Token** (or Granular Token scoped to `n8n-node-browser-ceki`)
+2. Create an **Automation Token** (or Granular Token scoped to `@ceki/n8n-node-browser-ceki`)
 3. Go to GitHub repo → **Settings** → **Secrets and variables** → **Actions**
 4. Add new repository secret:
    - **Name:** `NPM_TOKEN`

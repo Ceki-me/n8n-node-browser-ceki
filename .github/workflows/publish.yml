@@ -28,12 +28,5 @@ jobs:
       - name: Build package
         run: npm run build
 
-      # Option A (OIDC): leave NPM_TOKEN unset — no .npmrc is written,
-      #   npm uses the OIDC exchange for both auth and provenance.
-      # Option B (token): set NPM_TOKEN in repo secrets.
       - name: Publish to npm with provenance
-        run: |
-          [ -n "$NPM_TOKEN" ] && npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
-          npm publish --provenance --access public
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public
