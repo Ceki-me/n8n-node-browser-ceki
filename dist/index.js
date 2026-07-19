@@ -621,7 +621,10 @@ var BrowserCeki = class {
     this.description = {
       displayName: "Browser Ceki",
       name: "browserCeki",
-      icon: { light: "file:ceki-light.svg", dark: "file:ceki-dark.svg" },
+      icon: {
+        light: "file:ceki-light.svg",
+        dark: "file:ceki-dark.svg"
+      },
       group: ["transform"],
       version: 1,
       usableAsTool: true,

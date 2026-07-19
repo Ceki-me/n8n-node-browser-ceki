@@ -1,14 +1,18 @@
-// Copies ceki.png next to every node → into the matching dist/nodes/... folder.
-// tsc only compiles .ts; the icon (file:ceki.png) must sit beside the compiled .js for n8n to find it.
+// Copies ceki.png + ceki-{light,dark}.svg next to every node
+// → into the matching dist/nodes/... folder for n8n to find by file:...
 const fs = require('fs');
 const path = require('path');
 
-const ICON_SRC = path.join('nodes', 'BrowserCeki', 'ceki.png');
-if (!fs.existsSync(ICON_SRC)) {
-	console.error('icon source not found:', ICON_SRC);
-	process.exit(0);
+const ICONS = ['ceki.png', 'ceki-light.svg', 'ceki-dark.svg'];
+const SRC = 'nodes/BrowserCeki';
+
+for (const name of ICONS) {
+	const src = path.join(SRC, name);
+	if (!fs.existsSync(src)) {
+		console.error('icon not found:', src);
+		process.exit(0);
+	}
 }
-const svg = fs.readFileSync(ICON_SRC);
 
 function walk(dir) {
 	let out = [];
@@ -22,9 +26,11 @@ function walk(dir) {
 	return out;
 }
 
-let n = 0;
-for (const d of walk('dist/nodes')) {
-	fs.writeFileSync(path.join(d, 'ceki.png'), svg);
-	n++;
+for (const name of ICONS) {
+	const data = fs.readFileSync(path.join(SRC, name));
+	const dirs = walk('dist/nodes');
+	for (const d of dirs) {
+		fs.writeFileSync(path.join(d, name), data);
+	}
+	console.log(`copied ${name} to ${dirs.length} node dirs`);
 }
-console.log(`copied ceki.png to ${n} node dirs`);
