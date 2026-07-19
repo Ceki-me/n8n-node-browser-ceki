@@ -1,0 +1,18 @@
+name: Debug NPM_TOKEN
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug-token:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show token info
+        run: |
+          TOKEN="${{ secrets.NPM_TOKEN }}"
+          echo "Token length: ${#TOKEN}"
+          echo "Token starts with: ${TOKEN:0:4}"
+          echo "Token ends with: ${TOKEN: -4}"
+        shell: bash
