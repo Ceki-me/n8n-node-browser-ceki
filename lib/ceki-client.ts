@@ -167,9 +167,11 @@ export class CekiClient {
 		}
 		// OPEN → initiate close and wait for handshake (up to 5s safety timeout)
 		await new Promise<void>(r => {
-			const t = setTimeout(() => { r(); }, 5000);
-			ws.onclose = () => { this._connected = false; clearTimeout(t); r(); };
-			try { ws.close(); } catch { clearTimeout(t); r(); }
+			const onAbort = () => r();
+			const abortTimer = AbortSignal.timeout(5000);
+			abortTimer.addEventListener('abort', onAbort, { once: true });
+			ws.onclose = () => { this._connected = false; abortTimer.removeEventListener('abort', onAbort); r(); };
+			try { ws.close(); } catch { abortTimer.removeEventListener('abort', onAbort); r(); }
 		});
 		this._ws = null;
 	}
