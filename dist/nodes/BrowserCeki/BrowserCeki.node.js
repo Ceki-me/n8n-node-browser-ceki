@@ -1603,7 +1603,7 @@ var BrowserCeki = class {
           out.push({ json: { error: error.message }, pairedItem: { item: i } });
           continue;
         }
-        throw new import_n8n_workflow.NodeApiError(this.getNode(), error);
+        throw new import_n8n_workflow.NodeApiError(this.getNode(), error, { itemIndex: i });
       }
     }
     if (touchedSessions.size) {
