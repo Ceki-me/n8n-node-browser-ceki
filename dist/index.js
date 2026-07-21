@@ -713,8 +713,8 @@ var BrowserCeki = class {
           type: "options",
           default: "incognito",
           options: [
-            { name: "Main", value: "main" },
-            { name: "Incognito", value: "incognito" }
+            { name: "Incognito", value: "incognito" },
+            { name: "Main", value: "main" }
           ],
           displayOptions: { show: { operation: ["rent", "full"] } }
         },
@@ -770,7 +770,7 @@ var BrowserCeki = class {
           displayOptions: { show: { operation: ["captchaScrape"] } }
         },
         {
-          displayName: "Wait Timeout (ms)",
+          displayName: "Wait Timeout (Ms)",
           name: "waitTimeout",
           type: "number",
           default: 3e4,
@@ -988,8 +988,8 @@ var BrowserCeki = class {
           type: "options",
           default: "png",
           options: [
-            { name: "PNG (Binary)", value: "png" },
-            { name: "Base64", value: "base64" }
+            { name: "Base64", value: "base64" },
+            { name: "PNG (Binary)", value: "png" }
           ],
           displayOptions: { show: { operation: ["screenshot"] } }
         },
@@ -1019,7 +1019,7 @@ var BrowserCeki = class {
           displayOptions: { show: { operation: ["waitForSelector"] } }
         },
         {
-          displayName: "Timeout (ms)",
+          displayName: "Timeout (Ms)",
           name: "waitTimeout",
           type: "number",
           default: 3e4,
@@ -1606,7 +1606,7 @@ var BrowserCeki = class {
           out.push({ json: { error: error.message }, pairedItem: { item: i } });
           continue;
         }
-        throw error;
+        throw new import_n8n_workflow.NodeApiError(this.getNode(), error);
       }
     }
     if (touchedSessions.size) {

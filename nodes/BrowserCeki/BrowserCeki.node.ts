@@ -4,6 +4,7 @@ import type {
 	INodeExecutionData,
 	INodeType,
 	INodeTypeDescription,
+	JsonObject,
 } from 'n8n-workflow';
 import {
 	NodeApiError,
@@ -154,8 +155,8 @@ export class BrowserCeki implements INodeType {
 				type: 'options',
 				default: 'incognito',
 				options: [
-					{ name: 'Main', value: 'main' },
 					{ name: 'Incognito', value: 'incognito' },
+					{ name: 'Main', value: 'main' },
 				],
 				displayOptions: { show: { operation: ['rent', 'full'] } },
 			},
@@ -211,7 +212,7 @@ export class BrowserCeki implements INodeType {
 				displayOptions: { show: { operation: ['captchaScrape'] } },
 			},
 			{
-				displayName: 'Wait Timeout (ms)',
+				displayName: 'Wait Timeout (Ms)',
 				name: 'waitTimeout',
 				type: 'number',
 				default: 30000,
@@ -431,8 +432,8 @@ export class BrowserCeki implements INodeType {
 				type: 'options',
 				default: 'png',
 				options: [
-					{ name: 'PNG (Binary)', value: 'png' },
 					{ name: 'Base64', value: 'base64' },
+					{ name: 'PNG (Binary)', value: 'png' },
 				],
 				displayOptions: { show: { operation: ['screenshot'] } },
 			},
@@ -462,7 +463,7 @@ export class BrowserCeki implements INodeType {
 				displayOptions: { show: { operation: ['waitForSelector'] } },
 			},
 			{
-				displayName: 'Timeout (ms)',
+				displayName: 'Timeout (Ms)',
 				name: 'waitTimeout',
 				type: 'number',
 				default: 30000,
@@ -1010,7 +1011,7 @@ export class BrowserCeki implements INodeType {
 					out.push({ json: { error: (error as Error).message }, pairedItem: { item: i } });
 					continue;
 				}
-				throw error;
+				throw new NodeApiError(this.getNode(), error as JsonObject);
 			}
 		}
 
