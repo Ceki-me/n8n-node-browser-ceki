@@ -1,6 +1,6 @@
 {
   "name": "@ceki/n8n-nodes-ceki",
-  "version": "0.2.32",
+  "version": "0.2.33",
   "description": "Rent real human browsers in n8n — anti-bot scraping, captcha solving, geo-targeting, and browser automation. Powered by Ceki.",
   "keywords": [
     "n8n-community-node-package",
