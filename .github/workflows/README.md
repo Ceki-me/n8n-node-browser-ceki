@@ -3,7 +3,7 @@
 ## One-time setup
 
 1. Go to [npmjs.com](https://npmjs.com) → Account Settings → **Access Tokens**
-2. Create an **Automation Token** (or Granular Token scoped to `@ceki/n8n-nodes-ceki`)
+2. Create an **Automation Token** (or Granular Token scoped to `@ceki/n8n-node-browser-ceki`)
 3. Go to GitHub repo → **Settings** → **Secrets and variables** → **Actions**
 4. Add new repository secret:
    - **Name:** `NPM_TOKEN`
@@ -34,10 +34,10 @@ npm run release
 After publishing, verify provenance on npm:
 
 ```bash
-npm view @ceki/n8n-nodes-ceki --json | jq '.attestations'
+npm view n8n-node-browser-ceki --json | jq '.attestations'
 ```
 
-Or visit: https://www.npmjs.com/package/@ceki/n8n-nodes-ceki?activeTab=versions
+Or visit: https://www.npmjs.com/package/n8n-node-browser-ceki?activeTab=versions
 
 ## Requirements for n8n verification
 
