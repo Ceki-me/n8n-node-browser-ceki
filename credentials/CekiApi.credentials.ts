@@ -12,6 +12,7 @@ import type {
 export class CekiApi implements ICredentialType {
 	name = 'cekiApi';
 	displayName = 'Ceki API';
+	icon = { light: 'file:ceki-light.svg', dark: 'file:ceki-dark.svg' } as const;
 	documentationUrl = 'https://browser.ceki.me/docs#api-key';
 	properties: INodeProperties[] = [
 		{

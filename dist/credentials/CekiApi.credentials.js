@@ -27,6 +27,7 @@ var CekiApi = class {
   constructor() {
     this.name = "cekiApi";
     this.displayName = "Ceki API";
+    this.icon = { light: "file:ceki-light.svg", dark: "file:ceki-dark.svg" };
     this.documentationUrl = "https://browser.ceki.me/docs#api-key";
     this.properties = [
       {

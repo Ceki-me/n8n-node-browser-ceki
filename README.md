@@ -14,11 +14,11 @@ All of the logic lives in [`@ceki/sdk`](https://www.npmjs.com/package/@ceki/sdk)
 
 ## Install
 
-**In self-hosted n8n:** Settings → Community Nodes → Install → `n8n-nodes-ceki`
+**In self-hosted n8n:** Settings → Community Nodes → Install → `@ceki/n8n-nodes-ceki`
 
 **Manually:**
 ```bash
-npm install n8n-nodes-ceki
+npm install @ceki/n8n-nodes-ceki
 ```
 
 ## Credential

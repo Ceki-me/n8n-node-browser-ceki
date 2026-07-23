@@ -144,11 +144,7 @@ export class CekiClient {
 		return this._awaitResume(sessionId);
 	}
 
-	/** Close the WS connection — session stays alive in grace.
-	 *  Waits for the close handshake so the relay processes the close
-	 *  before a new connection with the same renterId is established
-	 *  (avoids the close-handler race condition).
-	 */
+	/** Close the WS connection — session stays alive in grace. */
 	async disconnect(): Promise<void> {
 		this._closed = true;
 		this._activeSessions.clear();
@@ -167,9 +163,11 @@ export class CekiClient {
 		}
 		// OPEN → initiate close and wait for handshake (up to 5s safety timeout)
 		await new Promise<void>(r => {
-			const t = setTimeout(() => { r(); }, 5000);
-			ws.onclose = () => { this._connected = false; clearTimeout(t); r(); };
-			try { ws.close(); } catch { clearTimeout(t); r(); }
+			const abortSignal = AbortSignal.timeout(5000);
+			const onAbort = () => { r(); };
+			abortSignal.addEventListener('abort', onAbort, { once: true });
+			ws.onclose = () => { this._connected = false; abortSignal.removeEventListener('abort', onAbort); r(); };
+			try { ws.close(); } catch { abortSignal.removeEventListener('abort', onAbort); r(); }
 		});
 		this._ws = null;
 	}
@@ -268,8 +266,6 @@ export class CekiClient {
 		const eventId = msg.event_id ? String(msg.event_id) : null;
 		const sessionId = String(msg.session_id ?? '');
 		// Send match_ack to transition session from ACCEPTED to ACTIVE.
-		// Without this, subsequent resume from other n8n nodes would receive
-		// "match" instead of "resume_ok" (session stays ACCEPTED).
 		if (sessionId && this._ws?.readyState === WebSocket.OPEN) {
 			try { this._ws.send(JSON.stringify({ type: 'match_ack', session_id: sessionId })); } catch { /* ignore */ }
 		}
@@ -290,8 +286,6 @@ export class CekiClient {
 			return;
 		}
 		// Fallback: relay may send "match" during resume if session is ACCEPTED
-		// (e.g. when rent node finished without sending match_ack).
-		// Treat it like resume_ok so the next node doesn't hang.
 		const resumePending = sessionId ? this._pendingResumes.get(sessionId) : null;
 		if (resumePending) {
 			this._pendingResumes.delete(sessionId);
@@ -343,8 +337,6 @@ export class CekiClient {
 		const browser = this._activeSessions.get(sessionId);
 		if (!browser) return;
 		const id = Number(msg.id ?? 0);
-		// NOTE: pending CDP is stored on CekiBrowser._pendingCdp (set by CekiBrowser.send()),
-		// NOT on CekiClient._pendingCdp — they are different maps.
 		const pending = browser._pendingCdp.get(id);
 		if (!pending) return;
 		browser._pendingCdp.delete(id);
