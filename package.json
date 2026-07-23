@@ -1,6 +1,6 @@
 {
   "name": "@ceki/n8n-nodes-ceki",
-  "version": "0.2.33",
+  "version": "0.2.34",
   "description": "Rent real human browsers in n8n — anti-bot scraping, captcha solving, geo-targeting, and browser automation. Powered by Ceki.",
   "keywords": [
     "n8n-community-node-package",
@@ -28,10 +28,10 @@
   "homepage": "https://browser.ceki.me",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Ceki-me/n8n-nodes-ceki.git"
+    "url": "git+https://github.com/Ceki-me/n8n-node-browser-ceki.git"
   },
   "bugs": {
-    "url": "https://github.com/Ceki-me/n8n-nodes-ceki/issues"
+    "url": "https://github.com/Ceki-me/n8n-node-browser-ceki/issues"
   },
   "main": "dist/index.js",
   "scripts": {
